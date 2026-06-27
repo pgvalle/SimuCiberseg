@@ -1,0 +1,103 @@
+================================================================================
+REPORT NOTES: MEMORY FOOTPRINT COMPARISON & DUAL-STACK ARCHITECTURE
+================================================================================
+
+1. IPv4 to IPv6 Conversion in P4Drop-Ext
+---------------------------------------
+Question: By using IPv6, should IPv4 be converted to IPv6 in the modification?
+
+Answer: No, IPv4 addresses do NOT need to be converted or translated to IPv6
+addresses (such as using IPv4-mapped IPv6 addresses, e.g., ::ffff:a.b.c.d).
+
+* How it works:
+  The P4 program handles IPv4 and IPv6 packets in separate, clean conditional
+  branches: `if (hdr.ipv4.isValid()) { ... } else if (hdr.ipv6.isValid()) { ... }`.
+
+* Hashing Unified Signatures:
+  Instead of mapping address spaces, we use P4's native `hash()` primitive
+  to compute a fixed 128-bit flow signature (`reg_sig`) over the headers:
+  - For IPv4: hash of { TYPE_IPV4, src_ip (32b), dst_ip (32b), src_port (16b), dst_port (16b) }
+  - For IPv6: hash of { TYPE_IPV6, src_ip (128b), dst_ip (128b), src_port (16b), dst_port (16b) }
+
+* Why this is better:
+  Pre-pending the EtherType constant (TYPE_IPV4/TYPE_IPV6) ensures that overlapping
+  address bytes between IPv4 and IPv6 flows will not cause signature collisions.
+  Avoiding translation logic saves parser resources, ALU operations, and data-plane
+  latency. Both protocol stacks coexist natively, mapping to the same physical registers.
+
+
+2. Memory Footprint Comparison (Original P4Drop vs. P4Drop-Ext)
+--------------------------------------------------------------
+Hardware P4 switches (e.g., Intel Tofino ASICs) store flow state in high-speed
+SRAM registers, where memory is extremely scarce. Below is the direct comparison
+between the original IPv4-only implementation and our dual-stack unified signature design.
+
+| State Variable         | Original P4Drop (IPv4-Only) | Your P4Drop-Ext (Dual-Stack) |
+| :--------------------- | :-------------------------: | :--------------------------: |
+| Source Identifier       | 32 bits (`reg_srcIP`)       | 128 bits (`reg_sig`)         |
+| Destination Identifier  | 32 bits (`reg_dstIP`)       | [Merged in `reg_sig`]        |
+| Port Identifiers        | [Not Stored / Validated]    | [Merged in `reg_sig`]        |
+| Max Sequence            | 32 bits (`reg_maxSeq`)      | 32 bits (`reg_maxSeq`)       |
+| Gap Start               | 32 bits (`reg_gapStart`)    | 32 bits (`reg_gapStart`)     |
+| Gap Length              | 16 bits (`reg_gapLen`)      | 16 bits (`reg_gapLen`)       |
+| Retransmit Counter      | 8 bits (`reg_n_noRTX`)      | 8 bits (`reg_n_noRTX`)       |
+| Distrust Level          | 8 bits (`reg_distrust`)     | 8 bits (`reg_distrust`)      |
+| Active Drop Flag        | 8 bits (`reg_hasDropped`)   | 8 bits (`reg_hasDropped`)    |
+|------------------------|-----------------------------|------------------------------|
+| Total Bits per Entry    | **168 bits**                | **232 bits**                 |
+| Comparison to Baseline | **100% (Baseline)**         | **138% (+38% cost)**         |
+
+Key Takeaways for Your Report:
+* Supporting full dual-stack TCP spoofing mitigation (IPv4 & IPv6 concurrently)
+  only increases the register memory requirement by **38%** (from 168 to 232 bits per entry).
+* This is achieved because we combine the source IP, destination IP, source port,
+  and destination port into a single 128-bit flow signature.
+* If we had stored IPv6 addresses directly (naive dual-stack design storing separate
+  128-bit source and 128-bit destination registers), the entry size would balloon
+  to 360+ bits per entry. By using a 128-bit hash-based unified signature, we save
+  approx. 128 bits per entry compared to storing raw IPv6 addresses.
+================================================================================
+
+
+3. Payload Size Calculation (IPv4 vs IPv6)
+---------------------------------------
+Question: How is the TCP payload size calculated in P4Drop-Ext for both protocols?
+
+Answer: P4Drop needs the payload size to accurately update the expected sequence numbers. The calculation differs significantly between the two protocols:
+
+* IPv4 Payload Size:
+  Calculated as: `IPv4 Total Length - (IPv4 IHL * 4) - (TCP Data Offset * 4)`.
+  All necessary fields are present in the fixed IPv4 and TCP headers, making this straightforward for the P4 ALU to compute.
+
+* IPv6 Payload Size:
+  Calculated as: `IPv6 Payload Length - Length of Extension Headers - (TCP Data Offset * 4)`.
+  Unlike IPv4, the IPv6 `Payload Length` field does not include the 40-byte base header, but it DOES include all Extension Headers (EH) plus the TCP header and data. Because parsing arbitrary length EH chains in P4 is highly complex and resource-intensive, a common data plane simplification is to assume no extension headers are present (or drop packets with EHs). Assuming no EHs, the calculation becomes simply: `IPv6 Payload Length - (TCP Data Offset * 4)`.
+
+4. Handling IP Fragmentation in P4Drop-Ext
+---------------------------------------
+Question: How does fragmentation detection differ between IPv4 and IPv6?
+
+Answer: As noted previously, the most robust defense in limited data planes is to drop fragments because they lack the L4 headers needed for the 5-tuple signature. However, merely *detecting* that a packet is a fragment is fundamentally different between the two stacks:
+
+* Detecting IPv4 Fragments:
+  Very easy. The fragmentation fields (Identification, Flags, Fragment Offset) are built directly into the fixed 20-byte IPv4 header. The P4 parser simply extracts them, and the control logic drops the packet if `Fragment Offset > 0` or `More Fragments (MF) == 1`.
+
+* Detecting IPv6 Fragments:
+  Much harder. The base 40-byte IPv6 header removed fragmentation fields entirely to streamline routing. Fragmentation is instead indicated by the presence of a specific Extension Header (Next Header = 44). To detect an IPv6 fragment, the P4 parser must loop through or unroll the variable-length chain of Next Headers until it either finds the Fragment EH (and drops it) or reaches the upper layer protocol (TCP). This consumes significant parser states and cycles compared to IPv4.
+
+Answer: P4Drop, like most stateless or simple stateful P4 data-plane defenses, fundamentally relies on the L4 (TCP/UDP) header to extract ports and sequence numbers for flow validation. In an IP fragmented packet, only the first fragment (offset 0) contains the L4 header. Subsequent fragments do NOT contain the L4 header.
+
+* The Problem:
+  Because subsequent fragments lack L4 ports, the P4 switch cannot compute the 5-tuple unified signature (`reg_sig`). It cannot associate these fragments with the verified connection state.
+
+* How it should be handled:
+  In a production environment mitigating DDoS and spoofing attacks, the most robust approach is for the P4 switch to DROP all fragmented packets (i.e., IPv4 packets where `frag_offset > 0` or `MF == 1`, or IPv6 packets with a Fragmentation Extension Header). 
+  
+* Rationale for Dropping Fragments:
+  Modern networks rely on Path MTU Discovery (PMTUD) to avoid IP-level fragmentation. Fragmentation is increasingly rare in legitimate TCP traffic but is a very common technique used in evasion and DDoS attacks (e.g., Teardrop, fragment overlaps). By dropping fragments, P4Drop enforces strong security guarantees without needing complex, stateful packet reassembly buffers in the extremely limited SRAM of the switch.
+
+================================================================================
+
+
+validation of p4drop impl
+validation of p4drop-ext impl (for both ipv4 and ipv6)

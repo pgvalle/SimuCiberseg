@@ -1,0 +1,131 @@
+\documentclass[12pt]{article}
+
+\usepackage{sbc-template}
+\usepackage{graphicx,url}
+\usepackage[utf8]{inputenc}
+\usepackage[brazil]{babel}
+%\usepackage[latin1]{inputenc}
+
+% so that tectonic uses the same font as overleaf
+\usepackage{tgtermes}    % TeX Gyre Termes (Times New Roman alternative)
+\usepackage[T1]{fontenc} % Recommended for font encoding
+
+\usepackage{hyperref} % references can be clicked
+
+
+\hypersetup{
+    colorlinks=true, % Colors the text instead of drawing boxes
+    linkcolor=blue,  % Color for internal links (sections, figures, equations)
+    citecolor=red,   % Color for bibliography citations
+    urlcolor=cyan    % Color for external URLs
+}
+
+\graphicspath{{./figs}}
+
+
+\sloppy
+
+\title{P4DropExt: P4Drop compatível com IPv6}
+
+\author{Pedro G. Nogueira\inst{1}}
+
+
+\address{Secretaria do PEL -- Universidade do Estado do Rio de Janeiro
+  (UERJ)\\
+  %Caixa Postal 15.064 -- 91.501-970 -- Porto Alegre -- RS -- Brazil
+  Pavilhão Reitor João Lyra Filho, 5\inst{o} andar, bloco E, sala 5002\\
+  Rua São Francisco Xavier, n\inst{o}. 524\\
+  CEP 20550-900 -- Maracanã -- Rio de Janeiro -- RJ
+  \email{nogueira.pedro@posgraduacao.uerj.br}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+  ...
+\end{abstract}
+
+\begin{resumo}
+  ...
+\end{resumo}
+
+
+\section{Introdução}
+
+A segurança de redes é um aspecto de extrema relevância na infraestrutura atual da Internet.
+Infelizmente, atores maliciosos exploram continuamente vulnerabilidades inerentes aos protocolos de rede para orquestrar ataques e comprometer sistemas.
+O protocolo TCP, por não ter sido projetado com um foco primário em segurança, é um alvo frequente.
+Técnicas de ataque exploram o processo de estabelecimento de conexão,
+como é o caso do TCP SYN Flood, para exaurir os recursos dos servidores.
+Esse tipo de ataque frequentemente se apoia no IP Spoofing (falsificação de endereço IP),
+uma técnica onde o atacante forja o endereço IP de origem dos pacotes para personificar fontes confiáveis, dificultando a mitigação e o rastreamento.
+Tais ataques podem facilitar ameaças subsequentes severas, incluindo sequestro de sessão,
+ataques de homem-no-meio (man-in-the-middle) e ataques de negação de serviço (DoS).
+
+Ao longo dos anos, diversas tecnologias surgiram para fornecer uma infraestrutura de segurança mais robusta contra essas ameaças.
+Dentre elas, o advento dos comutadores programáveis de pacotes (ASICs) e do plano de dados programável representa uma mudança de paradigma.
+Esses dispositivos conseguem processar bilhões de pacotes por segundo (throughput na ordem de Tbps) e realizar inspeção profunda de pacotes em tempo real.
+Através de linguagens de domínio específico, como P4 (Programming Protocol-independent Packet Processors),
+tornou-se possível customizar o processamento de cabeçalhos, a manipulação de metadados e a lógica de encaminhamento diretamente no plano de dados.
+Isso permite implementar políticas de segurança ágeis que identificam e bloqueiam tráfego malicioso antes de sua entrada efetiva na rede,
+mitigando gargalos de comunicação e latência que são comuns em arquiteturas dependentes do plano de controle.
+
+Aproveitando o potencial dessa arquitetura, Xiao et al. propuseram o P4Drop,
+uma função heurística leve implementada no plano de dados programável para filtrar ataques de TCP spoofing de forma autônoma.
+O P4Drop estabelece um mecanismo de confiança baseado na queda ativa do primeiro pacote válido de um fluxo e na observação de retransmissões subsequentes,
+permitindo distinguir fluxos em malha fechada de tráfego falsificado.
+Os resultados experimentais da solução demonstraram uma alta eficácia,
+filtrando aproximadamente 98,6\% dos pacotes de ataque sob cenários de alta densidade.
+
+Apesar da alta eficácia e do processamento em line-rate, a heurística do P4Drop apresenta limitações arquiteturais,
+uma vez que foi modelado para funcionar exclusivamente com IPv4.
+Com a adoção maciça e irreversível do IPv6, as redes modernas operam majoritariamente em pilha dupla ou puramente IPv6.
+O protocolo IPv6 não apenas introduz endereços de 128 bits,
+mas também altera fundamentalmente a estrutura de fragmentação e leitura de cabeçalhos por meio dos Extension Headers.
+Modelos de defesa que dependem de offsets fixos, como o cálculo baseado no IPv4, perdem sua aplicabilidade nesse novo cenário.
+
+Neste contexto, o presente trabalho estende e adapta a heurística do P4Drop para operar nativamente em redes IPv6 e IPv4.
+A solução considera e discute os desafios intrínsecos do novo protocolo
+---como o processamento dos cabeçalhos de extensão e o balanceamento no consumo de memória para endereços de 128 bits---,
+demonstrando ser possível manter uma mitigação eficaz de anomalias TCP sem violar as restrições de hardware do plano de dados.
+(Falar algo sobre os resultados na versão final)
+
+(falar como está a organização do artigo; sujeito a mudanças)
+
+\section{P4Drop}
+
+Esta seção apresenta o P4drop em detalhes.
+
+\section{P4DropExt}
+
+Esta seção apresenta o P4DropExt em detalhes.
+Características, diferenças com o P4Drop original, e algumas discussões (limitações; principalmente em relação a fragmentação no ipv4 e ipv6).
+
+\section{Experimentos}
+
+Falar o objetivo dos experimentos.
+Primeira leva de experimentos: "validar" implementação do P4Drop.
+Segunda leva: "validar" implementação do P4DropExt.
+Terceira leva: Testes de estresse (não sei se vai dar pra fazer. Acho que meu computador vai chorar muito).
+
+\section{Resultados}
+
+Talvez seja uma subseção de experimentos.
+
+
+\section{Trabalhos Relacionados}
+
+...
+
+
+\section{Conclusão}
+
+...
+
+\bibliographystyle{sbc}
+% \bibliographystyle{unsrt} % i like this style more
+\bibliography{refs}
+
+\end{document}
