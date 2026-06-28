@@ -4,12 +4,3 @@ table_add ipv4_nhop ipv4_forward 10.0.1.101 => 00:04:00:00:01:01 1
 table_add ipv4_nhop ipv4_forward 10.0.2.101 => 00:04:00:00:02:01 2
 table_add ipv6_nhop ipv6_forward 2001:db8:1::101 => 00:04:00:00:01:01 1
 table_add ipv6_nhop ipv6_forward 2001:db8:2::101 => 00:04:00:00:02:01 2
-table_set_default send_frame _drop
-table_set_default forward _drop
-table_set_default ipv4_lpm _drop
-table_add send_frame rewrite_mac 2 => 00:aa:00:01:00:02
-table_add forward set_dmac 10.0.2.101 => 00:04:00:00:02:01
-table_add ipv4_lpm set_nhop 10.0.2.101/32 => 10.0.2.101 2
-table_add send_frame rewrite_mac 1 => 00:aa:00:01:00:01
-table_add forward set_dmac 10.0.1.101 => 00:04:00:00:01:01
-table_add ipv4_lpm set_nhop 10.0.1.101/32 => 10.0.1.101 1

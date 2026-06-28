@@ -7,101 +7,83 @@ import time
 
 from packet_utils import build_ethernet_header, build_ipv6_tcp
 
-if len(sys.argv) < 5:
-    print(
-        "Usage: python send_mixed_traffic_v6.py <server_ip> <port> <num_flows> <attack_ratio>"
-    )
-    sys.exit(1)
-
 server_ip = sys.argv[1]
 port = int(sys.argv[2])
 num_flows = int(sys.argv[3])
 attack_ratio = float(sys.argv[4])
+start_time = time.time()
 
 # Configure host IPv6 address and static neighbor
 os.system("echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null")
-os.system("echo 0 > /proc/sys/net/ipv6/conf/h1-eth0/disable_ipv6 2>/dev/null")
-os.system("echo 0 > /proc/sys/net/ipv6/conf/h1-eth0/accept_dad 2>/dev/null")
-os.system("ip -6 addr add 2001:db8:1::101/64 dev h1-eth0 2>/dev/null")
-os.system("ip -6 route add 2001:db8:2::/64 dev h1-eth0 2>/dev/null")
+os.system("echo 0 > /proc/sys/net/ipv6/conf/h2-eth0/disable_ipv6 2>/dev/null")
+os.system("echo 0 > /proc/sys/net/ipv6/conf/h2-eth0/accept_dad 2>/dev/null")
+os.system("ip -6 addr add 2001:db8:2::101/64 dev h2-eth0 2>/dev/null")
+os.system("ip -6 route add 2001:db8:1::/64 dev h2-eth0 2>/dev/null")
 os.system(
-    "ip -6 neigh add 2001:db8:2::101 lladdr 00:04:00:00:02:01 dev h1-eth0 2>/dev/null"
+    "ip -6 neigh add 2001:db8:1::101 lladdr 00:04:00:00:01:01 dev h2-eth0 2>/dev/null"
 )
 
 
-num_attack = int(num_flows * attack_ratio)
-num_legit = num_flows - num_attack
-
-start_time = time.time()
-
-
-def legitimate_flow(server_ip, port, num_legit):
+def legitimate_flow():
+    num_legit = num_flows * (1 - attack_ratio)
     thread_sleep = max(0.05, num_legit / 1500.0)
+    payload = b"LEGITIMATE_PAYLOAD".ljust(1024, b" ")
     try:
         s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        s.bind(("2001:db8:1::101", 0))
+        s.bind(("2001:db8:2::101", 0))
         s.connect((server_ip, port))
         while time.time() - start_time < 60.0:
-            s.send(b"LEGITIMATE_PAYLOAD".ljust(1000, b"X"))
+            s.send(payload)
             time.sleep(thread_sleep)
         s.close()
     except Exception as e:
-        print("Legit flow error: %s" % e)
+        pass
 
 
 attack_flows = []
-for i in range(num_attack):
-    attack_flows.append(
-        {
-            "src": "2001:db8:1::%d" % (200 + i),
-            "sport": random.randint(10000, 65000),
-            "seq": random.randint(1000, 90000),
-        }
-    )
+for i in range(num_flows):
+    is_attack = random.random() < attack_ratio
+    if is_attack:
+        src_ip = "2001:db8:2::%d" % (200 + i)
+        attack_flows.append({"src_ip": src_ip, "sport": 10000 + i, "seq": 1024})
+    else:
+        t = threading.Thread(target=legitimate_flow)
+        t.daemon = True
+        t.start()
 
-
-def attacker_thread():
-    s_raw = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
-    s_raw.bind(("h1-eth0", 0))
-    eth_hdr = build_ethernet_header("00:04:00:00:01:01", "00:04:00:00:02:01", 0x86DD)
-
+if not attack_flows:
     while time.time() - start_time < 60.0:
+        time.sleep(1)
+else:
+    s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
+    s.bind(("h2-eth0", 0))
+
+    eth_hdr = build_ethernet_header("00:04:00:00:02:01", "00:04:00:00:01:01", 0x86DD)
+    payload = b"ATTACK_PAYLOAD".ljust(1000, b" ")
+
+    while time.time() - start_time < 20.0:
+        time.sleep(1.0)
+
+    while time.time() - start_time < 40.0:
         for f in attack_flows:
             ipv6_tcp_payload = build_ipv6_tcp(
-                f["src"],
+                f["src_ip"],
                 server_ip,
                 f["sport"],
                 port,
                 "PA",
                 f["seq"],
-                ack=1,
-                payload=b"ATTACK_PAYLOAD".ljust(1000, b"X"),
+                ack=0,
+                payload=payload,
             )
             pkt = eth_hdr + ipv6_tcp_payload
-            s_raw.send(pkt)
-            f["seq"] += 1000
+            s.send(pkt)
+            f["seq"] += 1024
             time.sleep(max(0.001, 1.0 / 1500.0))
 
+    while time.time() - start_time < 60.0:
+        time.sleep(1.0)
 
-print(
-    "Starting IPv6 Mixed Traffic: %d legit flows, %d attack flows"
-    % (num_legit, num_attack)
-)
+    s.close()
 
-threads = []
-for _ in range(num_legit):
-    t = threading.Thread(target=legitimate_flow, args=(server_ip, port, num_legit))
-    t.daemon = True
-    t.start()
-    threads.append(t)
-    time.sleep(0.01)
-
-if num_attack > 0:
-    t = threading.Thread(target=attacker_thread)
-    t.daemon = True
-    t.start()
-    threads.append(t)
-
-time.sleep(65.0)
-
-print("Traffic generation finished.")
+time.sleep(5)

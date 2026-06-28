@@ -25,16 +25,16 @@ def find_pcap(base_dir, iface_prefix, suffix):
 
 
 def analyze_single_run(log_dir, is_v6=False):
-    sent_pcap = find_pcap(log_dir, "s1-eth1", "out")
-    recv_pcap = find_pcap(log_dir, "s1-eth2", "in")
+    sent_pcap = find_pcap(log_dir, "s1-eth2", "out")
+    recv_pcap = find_pcap(log_dir, "s1-eth1", "in")
 
     if not sent_pcap or not recv_pcap:
         return None
 
     if is_v6:
-        legit_ip = "2001:db8:1::101"
+        legit_ip = "2001:db8:2::101"
     else:
-        legit_ip = "10.0.1.101"
+        legit_ip = "10.0.2.101"
 
     try:
         from scapy.all import PcapReader
@@ -95,9 +95,9 @@ def analyze_single_spoofed(exp_name):
 
     is_v6 = exp_name == "v6_ext"
     if is_v6:
-        legit_ip = "2001:db8:1::101"
+        legit_ip = "2001:db8:2::101"
     else:
-        legit_ip = "10.0.1.101"
+        legit_ip = "10.0.2.101"
 
     max_time = 60
     sent_bins_all = []
@@ -113,8 +113,8 @@ def analyze_single_spoofed(exp_name):
 
     for run in runs:
         log_dir = f"out/{exp_name}/{run}/single"
-        sent_pcap = find_pcap(log_dir, "s1-eth1", "out")
-        recv_pcap = find_pcap(log_dir, "s1-eth2", "in")
+        sent_pcap = find_pcap(log_dir, "s1-eth2", "out")
+        recv_pcap = find_pcap(log_dir, "s1-eth1", "in")
 
         if not sent_pcap or not recv_pcap:
             continue
@@ -228,13 +228,15 @@ def analyze_single_spoofed(exp_name):
 
         plt.xlabel("Tempo (s)")
         plt.ylabel("Taxa de Pacotes (pps)")
-        
+
         is_ext = "ext" in exp_name
         impl_name = "P4DropExt" if is_ext else "P4Drop"
         proto = "IPv6" if "v6" in exp_name else "IPv4"
         run_suffix = "Execuções" if len(runs) > 1 else "Execução"
-        plt.title(f"{impl_name} - Eficácia de Fluxo de Atacante Único ({proto}) ({len(runs)} {run_suffix})")
-        
+        plt.title(
+            f"{impl_name} - Eficácia de Fluxo de Atacante Único ({proto}) ({len(runs)} {run_suffix})"
+        )
+
         plt.grid(True, alpha=0.3)
         plt.legend()
         plt.tight_layout()
@@ -242,11 +244,10 @@ def analyze_single_spoofed(exp_name):
         plt.close()
 
 
-
 def aggregate_and_plot(exp_name):
     analyze_single_spoofed(exp_name)
 
-    ratios = ["0.0", "0.25", "0.5", "0.75", "1.0"]
+    ratios = ["0.0", "0.1", "0.2", "0.5"]
     ddr_data = {r: [] for r in ratios}
     fnr_data = {r: [] for r in ratios}
 
@@ -295,13 +296,13 @@ def aggregate_and_plot(exp_name):
 
     plt.xlabel("Razão de Fluxo de Ataque (%)")
     plt.ylabel("Porcentagem (%)")
-    
+
     is_ext = "ext" in exp_name
     impl_name = "P4DropExt" if is_ext else "P4Drop"
     proto = "IPv6" if "v6" in exp_name else "IPv4"
     run_suffix = "Execuções" if len(runs) > 1 else "Execução"
     plt.title(f"{impl_name} - Desempenho Misto ({proto}) ({len(runs)} {run_suffix})")
-    
+
     plt.ylim(-5, 105)
     plt.legend()
     plt.grid(True, alpha=0.3)
