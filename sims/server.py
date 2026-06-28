@@ -8,15 +8,12 @@ start_time = time.time()
 
 
 def handle_client(conn, addr):
-    conn.settimeout(2.0)
     ip, sport = addr
     while True:
         try:
-            conn.recv(1024)
+            conn.recv(512)
             rel_time = time.time() - start_time
             print("%.3f - SERVER_RECEIVED: %s:%d" % (rel_time, ip, sport))
-        except socket.timeout:
-            continue
         except:
             break
     conn.close()
