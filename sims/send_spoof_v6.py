@@ -3,6 +3,7 @@ import socket
 import sys
 import time
 
+from attack_utils import next_attack_seq
 from config import PAYLOAD_SIZE, RECV_PORT, SIMULATION_END
 from packet_utils import build_ethernet_header, build_ipv6_tcp
 
@@ -24,15 +25,15 @@ s.bind(("h2-eth0", 0))
 
 eth_hdr = build_ethernet_header("00:04:00:00:02:01", "00:04:00:00:01:01", 0x86DD)
 payload = b"x" * PAYLOAD_SIZE
-seq = 0
+seq_state = {"seq": 0}
 
 while time.time() - start_time < SIMULATION_END:
+    seq = next_attack_seq(seq_state)
     ip_tcp_payload = build_ipv6_tcp(
         spoofed_ip, recv_ip, 50000, RECV_PORT, "PA", seq, ack=1, payload=payload
     )
     pkt = eth_hdr + ip_tcp_payload
     s.sendall(pkt)
-    seq += PAYLOAD_SIZE
     time.sleep(0.001)
 
 s.close()

@@ -3,6 +3,7 @@ import socket
 import sys
 import time
 
+from attack_utils import next_attack_seq
 from config import PAYLOAD_SIZE
 from packet_utils import build_ethernet_header, build_ipv6_tcp
 
@@ -20,20 +21,20 @@ os.system(
     "ip -6 neigh add 2001:db8:1::101 lladdr 00:04:00:00:01:01 dev h2-eth0 2>/dev/null"
 )
 
-s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
-s.bind(("h2-eth0", 0))
+sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
+sock.bind(("h2-eth0", 0))
 
 eth_hdr = build_ethernet_header("00:04:00:00:02:01", "00:04:00:00:01:01", 0x86DD)
 payload = b"x" * PAYLOAD_SIZE
-seq = 0
+seq_state = {"seq": 0}
 
 for i in range(n):
+    seq = next_attack_seq(seq_state)
     ip_tcp_payload = build_ipv6_tcp(
         ip, server_ip, 50000, port, "PA", seq, ack=1, payload=payload
     )
     pkt = eth_hdr + ip_tcp_payload
-    s.sendall(pkt)
-    seq += PAYLOAD_SIZE
+    sock.sendall(pkt)
     time.sleep(0.001)
 
-s.close()
+sock.close()

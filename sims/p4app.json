@@ -1,5 +1,5 @@
 {
-  "program": "p4drop.p4",
+  "program": "p4drop-ext.p4",
   "language": "p4-16",
   "targets": {
     "multiswitch": {
@@ -7,7 +7,7 @@
       "pcap_dump": true,
       "switches": {
         "s1": {
-          "commands": ["s1-commands.txt"]
+          "commands": ["s1-commands-v6.txt"]
         }
       },
       "links": [
@@ -16,12 +16,12 @@
       ],
       "hosts": {
         "h1": {
-          "cmd": "python recv.py",
+          "cmd": "python recv_v6.py",
+          "startup_sleep": 0.2,
           "wait": false
         },
         "h2": {
-          "cmd": "python send_spoof.py h1",
-          "startup_sleep": 0.1,
+          "cmd": "python send_mixed_v6.py 2001:db8:1::101 0.5",
           "wait": true
         }
       }

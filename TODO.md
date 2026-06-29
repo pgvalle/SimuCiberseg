@@ -1,10 +1,9 @@
 # TODO
 
-- Improve spoofing model.
-  - Simulate retransmissions probabilistically.
-  - Keep attack flow sequence state and sometimes resend a previous sequence.
-  - Make retransmission probability configurable.
-  - Prefer payload-bearing attack packets that look like established data flows.
+- Tune spoofing model.
+  - Validate the probabilistic retransmission rate against pcaps.
+  - Evaluate whether retransmissions should target the most recent sequence, a random previous sequence, or the actively dropped gap.
+  - Tune `ATTACK_RETRANSMIT_PROBABILITY` and `RETRANSMIT_HISTORY_SIZE`.
 
 - Rename graph labels.
   - Replace "Servidor" with "Receptor" or "Destinatario".

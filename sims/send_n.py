@@ -2,6 +2,7 @@ import socket
 import sys
 import time
 
+from attack_utils import next_attack_seq
 from config import PAYLOAD_SIZE
 from packet_utils import build_ethernet_header, build_ipv4_tcp
 
@@ -15,15 +16,15 @@ s.bind(("h2-eth0", 0))
 
 eth_hdr = build_ethernet_header("00:04:00:00:02:01", "00:04:00:00:01:01", 0x0800)
 payload = b"x" * PAYLOAD_SIZE
-seq = 0
+seq_state = {"seq": 0}
 
 for i in range(n):
+    seq = next_attack_seq(seq_state)
     ip_tcp_payload = build_ipv4_tcp(
         ip, server_ip, 50000, port, "PA", seq, ack=1, payload=payload
     )
     pkt = eth_hdr + ip_tcp_payload
     s.sendall(pkt)
-    seq += PAYLOAD_SIZE
     time.sleep(0.001)
 
 s.close()

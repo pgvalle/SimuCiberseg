@@ -4,6 +4,7 @@ import sys
 import threading
 import time
 
+from attack_utils import next_attack_seq
 from config import (
     ATTACK_END,
     ATTACK_START,
@@ -56,19 +57,19 @@ def attack_flow(props):
         time.sleep(1.0)
 
     while time.time() - start_time < ATTACK_END:
+        seq = next_attack_seq(props)
         ip_tcp_payload = build_ipv6_tcp(
             props["src_ip"],
             recv_ip,
             props["sport"],
             RECV_PORT,
             "PA",
-            props["seq"],
+            seq,
             ack=1,
             payload=payload,
         )
         pkt = eth_hdr + ip_tcp_payload
         sock.send(pkt)
-        props["seq"] += PAYLOAD_SIZE
         time.sleep(0.05)
 
     sock.close()
