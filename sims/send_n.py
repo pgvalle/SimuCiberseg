@@ -19,7 +19,7 @@ seq = 0
 
 for i in range(n):
     ip_tcp_payload = build_ipv4_tcp(
-        ip, server_ip, 50000, port, "S", seq, payload=payload
+        ip, server_ip, 50000, port, "PA", seq, ack=1, payload=payload
     )
     pkt = eth_hdr + ip_tcp_payload
     s.sendall(pkt)

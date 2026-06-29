@@ -68,7 +68,7 @@ for i in range(NUM_FLOWS):
         props = {
             "src_ip": "10.1.0.%d" % (i + 1),
             "sport": 10000 + i,
-            "seq": PAYLOAD_SIZE,
+            "seq": 0,
         }
         thread = threading.Thread(target=attack_flow, args=(props,))
         thread.daemon = True

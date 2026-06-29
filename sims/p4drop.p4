@@ -212,8 +212,8 @@ control MyIngress(inout headers hdr,
                 }
 
                 if (is_pure_ack == 1) {
-                    // Associate pure ACKs with the reverse data flow, but never
-                    // use them as retransmission evidence.
+                    // Pure ACKs are allowed only for data flows already tracked
+                    // in the reverse direction; they still do not update state.
                     bit<32> ack_hash_idx;
                     hash(ack_hash_idx, HashAlgorithm.crc32, (bit<32>)0,
                          { hdr.ipv4.dstAddr, hdr.ipv4.srcAddr, hdr.tcp.dstPort, hdr.tcp.srcPort },
@@ -223,7 +223,12 @@ control MyIngress(inout headers hdr,
                     bit<32> ack_r_dstIP;
                     reg_srcIP.read(ack_r_srcIP, ack_hash_idx);
                     reg_dstIP.read(ack_r_dstIP, ack_hash_idx);
-                    ipv4_nhop.apply();
+
+                    if (ack_r_srcIP == hdr.ipv4.dstAddr && ack_r_dstIP == hdr.ipv4.srcAddr) {
+                        ipv4_nhop.apply();
+                    } else {
+                        drop();
+                    }
                 } else if (tcp_payload_len == 0) {
                     ipv4_nhop.apply();
                 } else {

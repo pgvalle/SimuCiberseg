@@ -256,8 +256,8 @@ control MyIngress(inout headers hdr,
                 }
 
                 if (is_pure_ack == 1) {
-                    // Associate pure ACKs with the reverse data flow, but never
-                    // use them as retransmission evidence.
+                    // Pure ACKs are allowed only for data flows already tracked
+                    // in the reverse direction; they still do not update state.
                     bit<32> ack_hash_idx;
                     hash(ack_hash_idx, HashAlgorithm.crc32, (bit<32>)0,
                          { hdr.ipv4.dstAddr, hdr.ipv4.srcAddr, hdr.tcp.dstPort, hdr.tcp.srcPort },
@@ -274,7 +274,12 @@ control MyIngress(inout headers hdr,
                     bit<64> ack_signature = ack_sig_p1 ++ ack_sig_p2;
                     bit<64> ack_r_sig;
                     reg_sig.read(ack_r_sig, ack_hash_idx);
-                    ipv4_nhop.apply();
+
+                    if (ack_r_sig == ack_signature) {
+                        ipv4_nhop.apply();
+                    } else {
+                        drop();
+                    }
                 } else if (tcp_payload_len == 0) {
                     ipv4_nhop.apply();
                 } else {
@@ -456,8 +461,8 @@ control MyIngress(inout headers hdr,
                 }
 
                 if (is_pure_ack == 1) {
-                    // Associate pure ACKs with the reverse data flow, but never
-                    // use them as retransmission evidence.
+                    // Pure ACKs are allowed only for data flows already tracked
+                    // in the reverse direction; they still do not update state.
                     bit<32> ack_hash_idx;
                     hash(ack_hash_idx, HashAlgorithm.crc32, (bit<32>)0,
                          { hdr.ipv6.dstAddr, hdr.ipv6.srcAddr, hdr.tcp.dstPort, hdr.tcp.srcPort },
@@ -474,7 +479,12 @@ control MyIngress(inout headers hdr,
                     bit<64> ack_signature = ack_sig_p1 ++ ack_sig_p2;
                     bit<64> ack_r_sig;
                     reg_sig.read(ack_r_sig, ack_hash_idx);
-                    ipv6_nhop.apply();
+
+                    if (ack_r_sig == ack_signature) {
+                        ipv6_nhop.apply();
+                    } else {
+                        drop();
+                    }
                 } else if (tcp_payload_len == 0) {
                     ipv6_nhop.apply();
                 } else {

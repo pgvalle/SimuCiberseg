@@ -16,10 +16,15 @@ except ImportError:
     sys.exit(1)
 
 
-MIXED_RATIOS = ["0.1", "0.2", "0.5"]
-MAX_TIME = 120
-SENT_IFACE = "s1-eth2"
-RECV_IFACE = "s1-eth1"
+EXPERIMENTS = [
+    ("v4_base", "P4Drop"),
+    ("v4_ext", "P4DropExt IPv4"),
+    ("v6_ext", "P4DropExt IPv6"),
+]
+MIXED_RATIOS = ["0.0", "0.1", "0.2", "0.5"]
+ATTACK_RATIOS = ["0.1", "0.2", "0.5"]
+SENT_PCAP = ("s1-eth2", "out")
+RECV_PCAP = ("s1-eth1", "in")
 
 
 def find_pcap(base_dir, iface_prefix, suffix):
@@ -27,299 +32,222 @@ def find_pcap(base_dir, iface_prefix, suffix):
     return str(pcap) if pcap.exists() else None
 
 
-def legit_ip_for(exp_name=None, is_v6=False):
-    if is_v6 or exp_name == "v6_ext":
+def legit_ip_for(exp_name):
+    if exp_name == "v6_ext":
         return "2001:db8:2::101"
     return "10.0.2.101"
 
 
-def tcp_source(packet, is_v6=False):
+def tcp_src_and_payload_len(packet, is_v6=False):
     if is_v6:
         if IPv6 in packet and TCP in packet:
-            return packet[IPv6].src
+            return packet[IPv6].src, len(bytes(packet[TCP].payload))
     elif IP in packet and TCP in packet:
-        return packet[IP].src
-    return None
+        return packet[IP].src, len(bytes(packet[TCP].payload))
+    return None, 0
 
 
-def analyze_mixed_run(log_dir, is_v6=False):
-    sent_pcap = find_pcap(log_dir, SENT_IFACE, "out")
-    recv_pcap = find_pcap(log_dir, RECV_IFACE, "in")
-
-    if not sent_pcap or not recv_pcap:
-        return None
-
-    legit_ip = legit_ip_for(is_v6=is_v6)
-
-    try:
-        from scapy.all import PcapReader
-    except ImportError:
-        return None
-
-    legit_sent = 0
-    attack_sent = 0
-    try:
-        with PcapReader(sent_pcap) as reader:
-            for p in reader:
-                src = tcp_source(p, is_v6=is_v6)
-                if src is None:
-                    continue
-                if src == legit_ip:
-                    legit_sent += 1
-                else:
-                    attack_sent += 1
-    except Exception:
-        pass
-
-    legit_recv = 0
-    attack_recv = 0
-    try:
-        with PcapReader(recv_pcap) as reader:
-            for p in reader:
-                src = tcp_source(p, is_v6=is_v6)
-                if src is None:
-                    continue
-                if src == legit_ip:
-                    legit_recv += 1
-                else:
-                    attack_recv += 1
-    except Exception:
-        pass
-
-    if legit_sent == 0 and attack_sent == 0:
-        return None
-    ddr = (legit_recv / legit_sent) * 100 if legit_sent > 0 else 100.0
-    fnr = (attack_recv / attack_sent) * 100 if attack_sent > 0 else 0.0
-    return (ddr, fnr)
+def iter_runs(exp_name):
+    exp_dir = Path("out") / exp_name
+    if not exp_dir.exists():
+        return []
+    return sorted(d.name for d in exp_dir.iterdir() if d.is_dir() and d.name.startswith("run_"))
 
 
-def packet_count_series(log_dir, is_v6=False, source_filter=None, max_time=MAX_TIME):
-    sent_pcap = find_pcap(log_dir, SENT_IFACE, "out")
-    recv_pcap = find_pcap(log_dir, RECV_IFACE, "in")
-
-    if not sent_pcap or not recv_pcap:
-        return None
-
+def count_payload_packets(pcap_path, exp_name, legit_ip):
     from scapy.all import PcapReader
 
-    start_t = None
-    for pcap in (sent_pcap, recv_pcap):
-        try:
-            with PcapReader(pcap) as reader:
-                for packet in reader:
-                    src = tcp_source(packet, is_v6=is_v6)
-                    if src is None:
-                        continue
-                    if source_filter is None or source_filter(src):
-                        start_t = float(packet.time)
-                        break
-        except Exception:
-            pass
-        if start_t is not None:
-            break
+    is_v6 = exp_name == "v6_ext"
+    legit = 0
+    attack = 0
 
-    if start_t is None:
+    try:
+        with PcapReader(pcap_path) as reader:
+            for packet in reader:
+                src, payload_len = tcp_src_and_payload_len(packet, is_v6=is_v6)
+                if src is None or payload_len == 0:
+                    continue
+                if src == legit_ip:
+                    legit += 1
+                else:
+                    attack += 1
+    except Exception as exc:
+        print(f"Warning: failed reading {pcap_path}: {exc}")
+
+    return legit, attack
+
+
+def analyze_run(exp_name, scenario):
+    log_dir = Path("out") / exp_name / scenario
+    sent_pcap = find_pcap(log_dir, *SENT_PCAP)
+    recv_pcap = find_pcap(log_dir, *RECV_PCAP)
+
+    if not sent_pcap or not recv_pcap:
         return None
 
-    def count_bins(pcap):
-        bins = [0] * max_time
-        try:
-            with PcapReader(pcap) as reader:
-                for packet in reader:
-                    src = tcp_source(packet, is_v6=is_v6)
-                    if src is None:
-                        continue
-                    if source_filter is not None and not source_filter(src):
-                        continue
-                    t = int(float(packet.time) - start_t)
-                    if 0 <= t < max_time:
-                        bins[t] += 1
-        except Exception:
-            pass
-        return bins
-
-    return count_bins(sent_pcap), count_bins(recv_pcap)
-
-
-def plot_packet_count_series(exp_name, scenario, title_subject, flow_label, source_filter):
-    runs = [d for d in os.listdir(f"out/{exp_name}") if d.startswith("run_")]
-    if not runs:
-        return
-
-    is_v6 = exp_name == "v6_ext"
     legit_ip = legit_ip_for(exp_name)
+    legit_sent, attack_sent = count_payload_packets(sent_pcap, exp_name, legit_ip)
+    legit_recv, attack_recv = count_payload_packets(recv_pcap, exp_name, legit_ip)
 
-    max_time = MAX_TIME
-    sent_bins_all = []
-    recv_bins_all = []
+    return {
+        "legit_sent": legit_sent,
+        "legit_recv": legit_recv,
+        "attack_sent": attack_sent,
+        "attack_recv": attack_recv,
+    }
 
-    for run in runs:
-        log_dir = f"out/{exp_name}/{run}/{scenario}"
-        series = packet_count_series(
-            log_dir,
-            is_v6=is_v6,
-            source_filter=lambda src: source_filter(src, legit_ip),
-            max_time=max_time,
-        )
-        if series is None:
+
+def metric_rates(counts):
+    if counts is None:
+        return np.nan, np.nan
+
+    ldr = np.nan
+    alr = np.nan
+
+    if counts["legit_sent"] > 0:
+        ldr = counts["legit_recv"] / counts["legit_sent"] * 100.0
+    if counts["attack_sent"] > 0:
+        alr = counts["attack_recv"] / counts["attack_sent"] * 100.0
+
+    return ldr, alr
+
+
+def collect_metric(exp_name, scenario, metric_name):
+    values = []
+    for run in iter_runs(exp_name):
+        counts = analyze_run(exp_name, f"{run}/{scenario}")
+        ldr, alr = metric_rates(counts)
+        value = ldr if metric_name == "ldr" else alr
+        if not np.isnan(value):
+            values.append(value)
+    return values
+
+
+def mean_and_sem(values):
+    if not values:
+        return np.nan, 0.0
+    if len(values) == 1:
+        return float(values[0]), 0.0
+    return float(np.mean(values)), float(st.sem(values))
+
+
+def available_experiments():
+    return [(name, label) for name, label in EXPERIMENTS if Path("out", name).exists()]
+
+
+def save_validation_plot(experiments):
+    labels = [label for _, label in experiments]
+    x = np.arange(len(labels))
+    width = 0.36
+
+    legit_means = []
+    legit_errs = []
+    spoof_means = []
+    spoof_errs = []
+
+    for exp_name, _ in experiments:
+        mean, err = mean_and_sem(collect_metric(exp_name, "legit", "ldr"))
+        legit_means.append(mean)
+        legit_errs.append(err)
+
+        mean, err = mean_and_sem(collect_metric(exp_name, "spoof", "alr"))
+        spoof_means.append(mean)
+        spoof_errs.append(err)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
+
+    axes[0].bar(x, legit_means, width, yerr=legit_errs, color="#2e7d32", capsize=4)
+    axes[0].set_title("Entrega de Trafego Legitimo")
+    axes[0].set_ylabel("Pacotes recebidos / transmitidos (%)")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(labels, rotation=15, ha="right")
+    axes[0].set_ylim(0, 105)
+    axes[0].grid(axis="y", alpha=0.25)
+
+    axes[1].bar(x, spoof_means, width, yerr=spoof_errs, color="#c62828", capsize=4)
+    axes[1].set_title("Vazamento de Ataque Spoofado")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(labels, rotation=15, ha="right")
+    axes[1].set_ylim(0, 105)
+    axes[1].grid(axis="y", alpha=0.25)
+
+    fig.suptitle("Validacao Basica das Implementacoes")
+    fig.tight_layout()
+    fig.savefig("out/validation_correctness.png")
+    plt.close(fig)
+
+
+def collect_mixed_series(exp_name, ratios, metric_name):
+    means = []
+    errs = []
+
+    for ratio in ratios:
+        values = collect_metric(exp_name, f"mixed_{ratio}", metric_name)
+        mean, err = mean_and_sem(values)
+        means.append(mean)
+        errs.append(err)
+
+        if not values:
+            print(f"Warning: missing data for {exp_name}/mixed_{ratio}")
+
+    return np.array(means), np.array(errs)
+
+
+def save_mixed_plot(experiments, ratios, metric_name, ylabel, title, output_file):
+    x = np.array([float(r) * 100.0 for r in ratios])
+
+    plt.figure(figsize=(8, 4.8))
+    for exp_name, label in experiments:
+        means, errs = collect_mixed_series(exp_name, ratios, metric_name)
+        valid = ~np.isnan(means)
+        if not np.any(valid):
             continue
-        sent_bins, recv_bins = series
-
-        sent_bins_all.append(sent_bins)
-        recv_bins_all.append(recv_bins)
-
-    if sent_bins_all and recv_bins_all:
-        sent_mean = np.mean(sent_bins_all, axis=0)
-        recv_mean = np.mean(recv_bins_all, axis=0)
-
-        sent_err = (
-            st.sem(sent_bins_all, axis=0)
-            if len(sent_bins_all) > 1
-            else np.zeros(max_time)
-        )
-        recv_err = (
-            st.sem(recv_bins_all, axis=0)
-            if len(recv_bins_all) > 1
-            else np.zeros(max_time)
+        plt.errorbar(
+            x[valid],
+            means[valid],
+            yerr=errs[valid],
+            marker="o",
+            capsize=4,
+            label=label,
         )
 
-        time_axis = np.arange(max_time)
-
-        plt.figure(figsize=(8, 5))
-        plt.plot(time_axis, sent_mean, label=f"Enviado ({flow_label})", color="blue")
-        plt.plot(time_axis, recv_mean, label="Recebido (Servidor)", color="red")
-
-        plt.fill_between(
-            time_axis,
-            sent_mean - sent_err,
-            sent_mean + sent_err,
-            color="blue",
-            alpha=0.15,
-        )
-        plt.fill_between(
-            time_axis,
-            recv_mean - recv_err,
-            recv_mean + recv_err,
-            color="red",
-            alpha=0.15,
-        )
-
-        plt.xlabel("Tempo (s)")
-        plt.ylabel("Taxa de Pacotes (pps)")
-
-        is_ext = "ext" in exp_name
-        impl_name = "P4DropExt" if is_ext else "P4Drop"
-        proto = "IPv6" if "v6" in exp_name else "IPv4"
-        plotted_runs = len(sent_bins_all)
-        run_suffix = "Execuções" if plotted_runs > 1 else "Execução"
-        plt.title(
-            f"{impl_name} - {title_subject} ({proto}) ({plotted_runs} {run_suffix})"
-        )
-
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.savefig(f"out/{exp_name}_{scenario}.png")
-        plt.close()
-
-
-def analyze_spoofed(exp_name):
-    plot_packet_count_series(
-        exp_name,
-        "spoof",
-        "Eficácia de Fluxo de Atacante Único",
-        "Atacante",
-        lambda src, legit_ip: src != legit_ip,
-    )
-
-
-def analyze_legit(exp_name):
-    plot_packet_count_series(
-        exp_name,
-        "legit",
-        "Fluxo Legítimo Único",
-        "Legítimo",
-        lambda src, legit_ip: src == legit_ip,
-    )
-
-
-def aggregate_and_plot(exp_name):
-    analyze_spoofed(exp_name)
-    analyze_legit(exp_name)
-
-    ratios = MIXED_RATIOS
-    ddr_data = {r: [] for r in ratios}
-    fnr_data = {r: [] for r in ratios}
-
-    runs = [d for d in os.listdir(f"out/{exp_name}") if d.startswith("run_")]
-    if not runs:
-        print(f"No runs found for {exp_name}")
-        return
-
-    for run in runs:
-        for ratio in ratios:
-            log_dir = f"out/{exp_name}/{run}/mixed_{ratio}"
-            res = analyze_mixed_run(log_dir, is_v6=(exp_name == "v6_ext"))
-            if res:
-                ddr, fnr = res
-                ddr_data[ratio].append(ddr)
-                fnr_data[ratio].append(fnr)
-
-    x_labels = [f"{float(r) * 100}%" for r in ratios]
-
-    ddr_means = [np.mean(ddr_data[r]) if ddr_data[r] else 0 for r in ratios]
-    ddr_errs = [st.sem(ddr_data[r]) if len(ddr_data[r]) > 1 else 0 for r in ratios]
-    fnr_means = [np.mean(fnr_data[r]) if fnr_data[r] else 0 for r in ratios]
-    fnr_errs = [st.sem(fnr_data[r]) if len(fnr_data[r]) > 1 else 0 for r in ratios]
-
-    plt.figure(figsize=(10, 5))
-    plt.errorbar(
-        x_labels,
-        ddr_means,
-        yerr=ddr_errs,
-        marker="o",
-        label="Taxa de Entrega de Pacotes (Legítimos)",
-        color="green",
-        capsize=5,
-        capthick=2,
-    )
-    plt.errorbar(
-        x_labels,
-        fnr_means,
-        yerr=fnr_errs,
-        marker="x",
-        label="Taxa de Falsos Negativos (Ataque Passou)",
-        color="red",
-        capsize=5,
-        capthick=2,
-    )
-
-    plt.xlabel("Razão de Fluxo de Ataque (%)")
-    plt.ylabel("Porcentagem (%)")
-
-    is_ext = "ext" in exp_name
-    impl_name = "P4DropExt" if is_ext else "P4Drop"
-    proto = "IPv6" if "v6" in exp_name else "IPv4"
-    run_suffix = "Execuções" if len(runs) > 1 else "Execução"
-    plt.title(f"{impl_name} - Desempenho Misto ({proto}) ({len(runs)} {run_suffix})")
-
+    plt.xlabel("Razao de Fluxos de Ataque (%)")
+    plt.ylabel(ylabel)
+    plt.title(title)
     plt.ylim(-5, 105)
-    plt.legend()
     plt.grid(True, alpha=0.3)
+    plt.legend()
     plt.tight_layout()
-    plt.savefig(f"out/{exp_name}_mixed.png")
+    plt.savefig(output_file)
     plt.close()
 
 
-if __name__ == "__main__":
-    if os.path.exists("out/v4_base"):
-        print("Analyzing v4_base...")
-        aggregate_and_plot("v4_base")
-    if os.path.exists("out/v4_ext"):
-        print("Analyzing v4_ext...")
-        aggregate_and_plot("v4_ext")
-    if os.path.exists("out/v6_ext"):
-        print("Analyzing v6_ext...")
-        aggregate_and_plot("v6_ext")
+def main():
+    experiments = available_experiments()
+    if not experiments:
+        print("No experiment outputs found in out/.")
+        return
+
+    save_validation_plot(experiments)
+    save_mixed_plot(
+        experiments,
+        MIXED_RATIOS,
+        "ldr",
+        "Entrega legitima (%)",
+        "Entrega de Trafego Legitimo em Cenario Misto",
+        "out/mixed_legitimate_delivery.png",
+    )
+    save_mixed_plot(
+        experiments,
+        ATTACK_RATIOS,
+        "alr",
+        "Vazamento de ataque (%)",
+        "Vazamento de Ataque em Cenario Misto",
+        "out/mixed_attack_leakage.png",
+    )
 
     print("Plots saved in out/ directory.")
+
+
+if __name__ == "__main__":
+    main()

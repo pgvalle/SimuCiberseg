@@ -3,7 +3,7 @@ PYTHON = $(VENV)/bin/python
 PIP = $(VENV)/bin/pip
 
 RUNS ?= 3
-RATIOS = 0.1 0.2 0.5
+RATIOS = 0.0 0.1 0.2 0.5
 
 .PHONY: all setup v4_base v4_ext v6_ext plot clean
 

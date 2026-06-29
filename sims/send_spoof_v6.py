@@ -28,7 +28,7 @@ seq = 0
 
 while time.time() - start_time < SIMULATION_END:
     ip_tcp_payload = build_ipv6_tcp(
-        spoofed_ip, recv_ip, 50000, RECV_PORT, "S", seq, payload=payload
+        spoofed_ip, recv_ip, 50000, RECV_PORT, "PA", seq, ack=1, payload=payload
     )
     pkt = eth_hdr + ip_tcp_payload
     s.sendall(pkt)

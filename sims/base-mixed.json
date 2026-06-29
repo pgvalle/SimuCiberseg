@@ -17,11 +17,11 @@
       "hosts": {
         "h1": {
           "cmd": "python recv.py",
+          "startup_sleep": 0.2,
           "wait": false
         },
         "h2": {
           "cmd": "python send_mixed.py h1 __RATIO__",
-          "startup_sleep": 0.1,
           "wait": true
         }
       }
