@@ -1,0 +1,30 @@
+{
+  "program": "p4drop-ext.p4",
+  "language": "p4-16",
+  "targets": {
+    "multiswitch": {
+      "auto-control-plane": true,
+      "pcap_dump": true,
+      "switches": {
+        "s1": {
+          "commands": ["s1-commands.txt"]
+        }
+      },
+      "links": [
+        ["h1", "s1"],
+        ["h2", "s1"]
+      ],
+      "hosts": {
+        "h1": {
+          "cmd": "python recv.py",
+          "wait": false
+        },
+        "h2": {
+          "cmd": "python send_legit.py h1",
+          "startup_sleep": 0.1,
+          "wait": true
+        }
+      }
+    }
+  }
+}
