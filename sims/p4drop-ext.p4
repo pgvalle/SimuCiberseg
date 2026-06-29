@@ -151,12 +151,12 @@ control MyVerifyChecksum(inout headers hdr, inout metadata meta) {
 control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
-    
+
     action mark_to_drop2(inout standard_metadata_t stdmata) {
         stdmata.egress_spec = BMV2_V1MODEL_SPECIAL_DROP_PORT;
         stdmata.mcast_grp = 0;
     }
-    
+
     action drop() {
         mark_to_drop2(standard_metadata);
     }
@@ -207,7 +207,7 @@ control MyIngress(inout headers hdr,
         size = 1024;
         default_action = drop();
     }
-    
+
     table arp_simple {
         actions = {
             set_arp_nhop;
@@ -241,8 +241,7 @@ control MyIngress(inout headers hdr,
     apply {
         if (hdr.arp.isValid()) {
             arp_simple.apply();
-        } 
-        else if (hdr.ipv4.isValid() && hdr.ipv4.ttl > 8w0) {
+        } else if (hdr.ipv4.isValid() && hdr.ipv4.ttl > 8w0) {
             // Drop IPv4 fragments
             if (hdr.ipv4.fragOffset > 0 || (hdr.ipv4.flags & 1) == 1) {
                 drop();
@@ -283,171 +282,170 @@ control MyIngress(inout headers hdr,
                 } else if (tcp_payload_len == 0) {
                     ipv4_nhop.apply();
                 } else {
-                // Hash index calculation for IPv4 (CRC32 over flow 4-tuple modulo FLOW_TABLE_SIZE)
-                bit<32> hash_idx;
-                hash(hash_idx, HashAlgorithm.crc32, (bit<32>)0, 
-                     { hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort }, 
-                     (bit<32>)FLOW_TABLE_SIZE);
+                    // Hash index calculation for IPv4 (CRC32 over flow 4-tuple modulo FLOW_TABLE_SIZE)
+                    bit<32> hash_idx;
+                    hash(hash_idx, HashAlgorithm.crc32, (bit<32>)0,
+                        { hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort },
+                        (bit<32>)FLOW_TABLE_SIZE);
 
 
-                // 64-bit signature generation using two CRC32 hashes with different salts to prevent overlap
-                bit<32> sig_p1;
-                bit<32> sig_p2;
-                hash(sig_p1, HashAlgorithm.crc32, (bit<32>)0,
-                     { TYPE_IPV4, hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort, (bit<8>)0 },
-                     (bit<32>)0xffffffff);
-                hash(sig_p2, HashAlgorithm.crc32, (bit<32>)0,
-                     { TYPE_IPV4, hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort, (bit<8>)1 },
-                     (bit<32>)0xffffffff);
-                bit<64> signature = sig_p1 ++ sig_p2;
+                    // 64-bit signature generation using two CRC32 hashes with different salts to prevent overlap
+                    bit<32> sig_p1;
+                    bit<32> sig_p2;
+                    hash(sig_p1, HashAlgorithm.crc32, (bit<32>)0,
+                        { TYPE_IPV4, hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort, (bit<8>)0 },
+                        (bit<32>)0xffffffff);
+                    hash(sig_p2, HashAlgorithm.crc32, (bit<32>)0,
+                        { TYPE_IPV4, hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort, (bit<8>)1 },
+                        (bit<32>)0xffffffff);
+                    bit<64> signature = sig_p1 ++ sig_p2;
 
-                // Read register state
-                bit<64> r_sig;
-                bit<32> r_maxSeq;
-                bit<32> r_gapStart;
-                bit<16> r_gapLen;
-                bit<8> r_n_noRTX;
-                bit<1> r_hasDropped;
-                bit<5> r_H1;
-                bit<5> r_H2;
-                bit<32> r_total_pkts;
-                bit<5> r_dup_pkts;
-                bit<32> r_last_seq;
+                    // Read register state
+                    bit<64> r_sig;
+                    bit<32> r_maxSeq;
+                    bit<32> r_gapStart;
+                    bit<16> r_gapLen;
+                    bit<8> r_n_noRTX;
+                    bit<1> r_hasDropped;
+                    bit<5> r_H1;
+                    bit<5> r_H2;
+                    bit<32> r_total_pkts;
+                    bit<5> r_dup_pkts;
+                    bit<32> r_last_seq;
 
-                reg_sig.read(r_sig, hash_idx);
-                reg_maxSeq.read(r_maxSeq, hash_idx);
-                reg_gapStart.read(r_gapStart, hash_idx);
-                reg_gapLen.read(r_gapLen, hash_idx);
-                reg_n_noRTX.read(r_n_noRTX, hash_idx);
-                reg_hasDropped.read(r_hasDropped, hash_idx);
-                reg_H1.read(r_H1, hash_idx);
-                reg_H2.read(r_H2, hash_idx);
-                reg_total_pkts.read(r_total_pkts, hash_idx);
-                reg_dup_pkts.read(r_dup_pkts, hash_idx);
-                reg_last_seq.read(r_last_seq, hash_idx);
+                    reg_sig.read(r_sig, hash_idx);
+                    reg_maxSeq.read(r_maxSeq, hash_idx);
+                    reg_gapStart.read(r_gapStart, hash_idx);
+                    reg_gapLen.read(r_gapLen, hash_idx);
+                    reg_n_noRTX.read(r_n_noRTX, hash_idx);
+                    reg_hasDropped.read(r_hasDropped, hash_idx);
+                    reg_H1.read(r_H1, hash_idx);
+                    reg_H2.read(r_H2, hash_idx);
+                    reg_total_pkts.read(r_total_pkts, hash_idx);
+                    reg_dup_pkts.read(r_dup_pkts, hash_idx);
+                    reg_last_seq.read(r_last_seq, hash_idx);
 
-                bit<1> is_new_flow = 0;
-                if (r_sig != signature) {
-                    is_new_flow = 1;
-                }
-
-                if (is_new_flow == 1) {
-                    // New Flow detected: Save flow signature, mark hasDropped = 1
-                    reg_sig.write(hash_idx, signature);
-                    reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
-                    reg_gapStart.write(hash_idx, hdr.tcp.seqNo);
-                    reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
-                    reg_n_noRTX.write(hash_idx, 0);
-                    reg_hasDropped.write(hash_idx, 1);
-                    reg_H1.write(hash_idx, 0);
-                    reg_H2.write(hash_idx, 0);
-                    reg_total_pkts.write(hash_idx, 1);
-                    reg_dup_pkts.write(hash_idx, 0);
-                    reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
-                    
-                    // Trigger active drop
-                    drop();
-                } else {
-                    bit<5> calculated_distrust;
-                    if (r_H2 + 1 >= r_H1) {
-                        calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
-                    } else {
-                        calculated_distrust = 0; // Clamped to 0
-                    }
-                    bit<32> tcp_next_seq = hdr.tcp.seqNo + tcp_payload_len;
-                    bit<32> gap_end = r_gapStart + (bit<32>)r_gapLen;
-                    bit<1> retransmits_gap = 0;
-                    if (r_hasDropped == 1) {
-                        if (r_gapLen == (bit<16>)0 && hdr.tcp.seqNo == r_gapStart && tcp_payload_len == 0) {
-                            retransmits_gap = 1;
-                        } else if (r_gapLen > (bit<16>)0 && hdr.tcp.seqNo <= r_gapStart && tcp_next_seq >= gap_end) {
-                            retransmits_gap = 1;
-                        }
+                    bit<1> is_new_flow = 0;
+                    if (r_sig != signature) {
+                        is_new_flow = 1;
                     }
 
-                    if (retransmits_gap == 1) {
-                        // Legitimate flow retransmitted the actively dropped packet.
-                        r_H1 = r_H1 + 1;
-                        reg_H1.write(hash_idx, r_H1);
+                    if (is_new_flow == 1) {
+                        // New Flow detected: Save flow signature, mark hasDropped = 1
+                        reg_sig.write(hash_idx, signature);
+                        reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
+                        reg_gapStart.write(hash_idx, hdr.tcp.seqNo);
+                        reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
                         reg_n_noRTX.write(hash_idx, 0);
-                        reg_hasDropped.write(hash_idx, 0);
-                        ipv4_nhop.apply();
-                    } else if (calculated_distrust >= DISTRUST_THRESHOLD_BLOCKED) {
-                        // Spoofer blocked!
-                        drop();
-                    } else {
-                        // Update f_dup statistics
-                        bit<32> next_total = r_total_pkts + 1;
-                        bit<5> next_dup = r_dup_pkts;
-                        if (hdr.tcp.seqNo == r_last_seq) {
-                            next_dup = r_dup_pkts + 1;
-                        }
-                        reg_total_pkts.write(hash_idx, next_total);
-                        reg_dup_pkts.write(hash_idx, next_dup);
+                        reg_hasDropped.write(hash_idx, 1);
+                        reg_H1.write(hash_idx, 0);
+                        reg_H2.write(hash_idx, 0);
+                        reg_total_pkts.write(hash_idx, 1);
+                        reg_dup_pkts.write(hash_idx, 0);
                         reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
 
-                        // f_dup check: numerator * T2 >= denominator means high repetition rate (T2 = 7)
-                        bit<32> threshold_check = (bit<32>)next_dup * 7;
-                        if (threshold_check >= next_total && next_total > 10) {
-                            // Penalty for excessive duplicates
-                            r_H2 = r_H2 + 1;
-                            reg_H2.write(hash_idx, r_H2);
-                            reg_dup_pkts.write(hash_idx, 0);
-                            reg_total_pkts.write(hash_idx, 1);
+                        // Trigger active drop
+                        drop();
+                    } else {
+                        bit<5> calculated_distrust;
+                        if (r_H2 + 1 >= r_H1) {
+                            calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
+                        } else {
+                            calculated_distrust = 0; // Clamped to 0
+                        }
+                        bit<32> tcp_next_seq = hdr.tcp.seqNo + tcp_payload_len;
+                        bit<32> gap_end = r_gapStart + (bit<32>)r_gapLen;
+                        bit<1> retransmits_gap = 0;
+                        if (r_hasDropped == 1) {
+                            if (r_gapLen == (bit<16>)0 && hdr.tcp.seqNo == r_gapStart && tcp_payload_len == 0) {
+                                retransmits_gap = 1;
+                            } else if (r_gapLen > (bit<16>)0 && hdr.tcp.seqNo <= r_gapStart && tcp_next_seq >= gap_end) {
+                                retransmits_gap = 1;
+                            }
                         }
 
-                        if (hdr.tcp.seqNo > r_maxSeq) {
-                            // New packet in the flow; only these packets are droppable.
-                            reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
-                            if (r_hasDropped == 1) {
-                                // Received another new packet while waiting for the retransmission of the dropped one.
-                                bit<8> next_n_noRTX = r_n_noRTX + 1;
-                                reg_n_noRTX.write(hash_idx, next_n_noRTX);
-                                if (next_n_noRTX >= N_NORTX_THRESHOLD_LEGITIMATE) {
-                                    // Increase H2 (mistrust)
-                                    r_H2 = r_H2 + 1;
-                                    reg_H2.write(hash_idx, r_H2);
-                                    // Reset n_noRTX
-                                    reg_n_noRTX.write(hash_idx, 0);
+                        if (retransmits_gap == 1) {
+                            // Legitimate flow retransmitted the actively dropped packet.
+                            r_H1 = r_H1 + 1;
+                            reg_H1.write(hash_idx, r_H1);
+                            reg_n_noRTX.write(hash_idx, 0);
+                            reg_hasDropped.write(hash_idx, 0);
+                            ipv4_nhop.apply();
+                        } else if (calculated_distrust >= DISTRUST_THRESHOLD_BLOCKED) {
+                            // Spoofer blocked!
+                            drop();
+                        } else {
+                            // Update f_dup statistics
+                            bit<32> next_total = r_total_pkts + 1;
+                            bit<5> next_dup = r_dup_pkts;
+                            if (hdr.tcp.seqNo == r_last_seq) {
+                                next_dup = r_dup_pkts + 1;
+                            }
+                            reg_total_pkts.write(hash_idx, next_total);
+                            reg_dup_pkts.write(hash_idx, next_dup);
+                            reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
+
+                            // f_dup check: numerator * T2 >= denominator means high repetition rate (T2 = 7)
+                            bit<32> threshold_check = (bit<32>)next_dup * 7;
+                            if (threshold_check >= next_total && next_total > 10) {
+                                // Penalty for excessive duplicates
+                                r_H2 = r_H2 + 1;
+                                reg_H2.write(hash_idx, r_H2);
+                                reg_dup_pkts.write(hash_idx, 0);
+                                reg_total_pkts.write(hash_idx, 1);
+                            }
+
+                            if (hdr.tcp.seqNo > r_maxSeq) {
+                                // New packet in the flow; only these packets are droppable.
+                                reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
+                                if (r_hasDropped == 1) {
+                                    // Received another new packet while waiting for the retransmission of the dropped one.
+                                    bit<8> next_n_noRTX = r_n_noRTX + 1;
+                                    reg_n_noRTX.write(hash_idx, next_n_noRTX);
+                                    if (next_n_noRTX >= N_NORTX_THRESHOLD_LEGITIMATE) {
+                                        // Increase H2 (mistrust)
+                                        r_H2 = r_H2 + 1;
+                                        reg_H2.write(hash_idx, r_H2);
+                                        // Reset n_noRTX
+                                        reg_n_noRTX.write(hash_idx, 0);
+                                    }
                                 }
-                            }
 
-                            // Re-calculate distrust dynamically after updates
-                            if (r_H2 + 1 >= r_H1) {
-                                calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
-                            } else {
-                                calculated_distrust = 0;
-                            }
+                                // Re-calculate distrust dynamically after updates
+                                if (r_H2 + 1 >= r_H1) {
+                                    calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
+                                } else {
+                                    calculated_distrust = 0;
+                                }
 
-                            // Probabilistic drop (5%) if in ambiguous state (distrust > 0)
-                            if (calculated_distrust > 0) {
-                                bit<8> rand_val;
-                                random(rand_val, (bit<8>)0, (bit<8>)100);
-                                if (rand_val < (bit<8>)5) {
-                                    // Trigger active drop for sampling
-                                    reg_gapStart.write(hash_idx, hdr.tcp.seqNo);
-                                    reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
-                                    reg_hasDropped.write(hash_idx, 1);
-                                    drop();
+                                // Probabilistic drop (5%) if in ambiguous state (distrust > 0)
+                                if (calculated_distrust > 0) {
+                                    bit<8> rand_val;
+                                    random(rand_val, (bit<8>)0, (bit<8>)100);
+                                    if (rand_val < (bit<8>)5) {
+                                        // Trigger active drop for sampling
+                                        reg_gapStart.write(hash_idx, hdr.tcp.seqNo);
+                                        reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
+                                        reg_hasDropped.write(hash_idx, 1);
+                                        drop();
+                                    } else {
+                                        ipv4_nhop.apply();
+                                    }
                                 } else {
                                     ipv4_nhop.apply();
                                 }
                             } else {
+                                // Duplicate or unrelated retransmission; not droppable by P4Drop.
                                 ipv4_nhop.apply();
                             }
-                        } else {
-                            // Duplicate or unrelated retransmission; not droppable by P4Drop.
-                            ipv4_nhop.apply();
                         }
                     }
-                }
                 }
             } else {
                 // Non-TCP IPv4 packets, just forward
                 ipv4_nhop.apply();
             }
-        }
-        else if (hdr.ipv6.isValid() && hdr.ipv6.hopLimit > 8w0) {
+        } else if (hdr.ipv6.isValid() && hdr.ipv6.hopLimit > 8w0) {
             // Drop IPv6 fragments (when Fragment Extension Header is the first EH)
             if (hdr.ipv6.nextHeader == 44) {
                 drop();
@@ -488,164 +486,164 @@ control MyIngress(inout headers hdr,
                 } else if (tcp_payload_len == 0) {
                     ipv6_nhop.apply();
                 } else {
-                // Hash index calculation for IPv6 (CRC32 over flow 4-tuple modulo FLOW_TABLE_SIZE)
-                bit<32> hash_idx;
-                hash(hash_idx, HashAlgorithm.crc32, (bit<32>)0, 
-                     { hdr.ipv6.srcAddr, hdr.ipv6.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort }, 
-                     (bit<32>)FLOW_TABLE_SIZE);
+                    // Hash index calculation for IPv6 (CRC32 over flow 4-tuple modulo FLOW_TABLE_SIZE)
+                    bit<32> hash_idx;
+                    hash(hash_idx, HashAlgorithm.crc32, (bit<32>)0,
+                        { hdr.ipv6.srcAddr, hdr.ipv6.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort },
+                        (bit<32>)FLOW_TABLE_SIZE);
 
 
-                // 64-bit signature generation using two CRC32 hashes with different salts to prevent overlap
-                bit<32> sig_p1;
-                bit<32> sig_p2;
-                hash(sig_p1, HashAlgorithm.crc32, (bit<32>)0,
-                     { TYPE_IPV6, hdr.ipv6.srcAddr, hdr.ipv6.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort, (bit<8>)0 },
-                     (bit<32>)0xffffffff);
-                hash(sig_p2, HashAlgorithm.crc32, (bit<32>)0,
-                     { TYPE_IPV6, hdr.ipv6.srcAddr, hdr.ipv6.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort, (bit<8>)1 },
-                     (bit<32>)0xffffffff);
-                bit<64> signature = sig_p1 ++ sig_p2;
+                    // 64-bit signature generation using two CRC32 hashes with different salts to prevent overlap
+                    bit<32> sig_p1;
+                    bit<32> sig_p2;
+                    hash(sig_p1, HashAlgorithm.crc32, (bit<32>)0,
+                        { TYPE_IPV6, hdr.ipv6.srcAddr, hdr.ipv6.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort, (bit<8>)0 },
+                        (bit<32>)0xffffffff);
+                    hash(sig_p2, HashAlgorithm.crc32, (bit<32>)0,
+                        { TYPE_IPV6, hdr.ipv6.srcAddr, hdr.ipv6.dstAddr, hdr.tcp.srcPort, hdr.tcp.dstPort, (bit<8>)1 },
+                        (bit<32>)0xffffffff);
+                    bit<64> signature = sig_p1 ++ sig_p2;
 
-                // Read register state
-                bit<64> r_sig;
-                bit<32> r_maxSeq;
-                bit<32> r_gapStart;
-                bit<16> r_gapLen;
-                bit<8> r_n_noRTX;
-                bit<1> r_hasDropped;
-                bit<5> r_H1;
-                bit<5> r_H2;
-                bit<32> r_total_pkts;
-                bit<5> r_dup_pkts;
-                bit<32> r_last_seq;
+                    // Read register state
+                    bit<64> r_sig;
+                    bit<32> r_maxSeq;
+                    bit<32> r_gapStart;
+                    bit<16> r_gapLen;
+                    bit<8> r_n_noRTX;
+                    bit<1> r_hasDropped;
+                    bit<5> r_H1;
+                    bit<5> r_H2;
+                    bit<32> r_total_pkts;
+                    bit<5> r_dup_pkts;
+                    bit<32> r_last_seq;
 
-                reg_sig.read(r_sig, hash_idx);
-                reg_maxSeq.read(r_maxSeq, hash_idx);
-                reg_gapStart.read(r_gapStart, hash_idx);
-                reg_gapLen.read(r_gapLen, hash_idx);
-                reg_n_noRTX.read(r_n_noRTX, hash_idx);
-                reg_hasDropped.read(r_hasDropped, hash_idx);
-                reg_H1.read(r_H1, hash_idx);
-                reg_H2.read(r_H2, hash_idx);
-                reg_total_pkts.read(r_total_pkts, hash_idx);
-                reg_dup_pkts.read(r_dup_pkts, hash_idx);
-                reg_last_seq.read(r_last_seq, hash_idx);
+                    reg_sig.read(r_sig, hash_idx);
+                    reg_maxSeq.read(r_maxSeq, hash_idx);
+                    reg_gapStart.read(r_gapStart, hash_idx);
+                    reg_gapLen.read(r_gapLen, hash_idx);
+                    reg_n_noRTX.read(r_n_noRTX, hash_idx);
+                    reg_hasDropped.read(r_hasDropped, hash_idx);
+                    reg_H1.read(r_H1, hash_idx);
+                    reg_H2.read(r_H2, hash_idx);
+                    reg_total_pkts.read(r_total_pkts, hash_idx);
+                    reg_dup_pkts.read(r_dup_pkts, hash_idx);
+                    reg_last_seq.read(r_last_seq, hash_idx);
 
-                bit<1> is_new_flow = 0;
-                if (r_sig != signature) {
-                    is_new_flow = 1;
-                }
-
-                if (is_new_flow == 1) {
-                    // New Flow detected: Save flow signature, mark hasDropped = 1
-                    reg_sig.write(hash_idx, signature);
-                    reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
-                    reg_gapStart.write(hash_idx, hdr.tcp.seqNo);
-                    reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
-                    reg_n_noRTX.write(hash_idx, 0);
-                    reg_hasDropped.write(hash_idx, 1);
-                    reg_H1.write(hash_idx, 0);
-                    reg_H2.write(hash_idx, 0);
-                    reg_total_pkts.write(hash_idx, 1);
-                    reg_dup_pkts.write(hash_idx, 0);
-                    reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
-                    
-                    // Trigger active drop
-                    drop();
-                } else {
-                    bit<5> calculated_distrust;
-                    if (r_H2 + 1 >= r_H1) {
-                        calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
-                    } else {
-                        calculated_distrust = 0; // Clamped to 0
-                    }
-                    bit<32> tcp_next_seq = hdr.tcp.seqNo + tcp_payload_len;
-                    bit<32> gap_end = r_gapStart + (bit<32>)r_gapLen;
-                    bit<1> retransmits_gap = 0;
-                    if (r_hasDropped == 1) {
-                        if (r_gapLen == (bit<16>)0 && hdr.tcp.seqNo == r_gapStart && tcp_payload_len == 0) {
-                            retransmits_gap = 1;
-                        } else if (r_gapLen > (bit<16>)0 && hdr.tcp.seqNo <= r_gapStart && tcp_next_seq >= gap_end) {
-                            retransmits_gap = 1;
-                        }
+                    bit<1> is_new_flow = 0;
+                    if (r_sig != signature) {
+                        is_new_flow = 1;
                     }
 
-                    if (retransmits_gap == 1) {
-                        // Legitimate flow retransmitted the actively dropped packet.
-                        r_H1 = r_H1 + 1;
-                        reg_H1.write(hash_idx, r_H1);
+                    if (is_new_flow == 1) {
+                        // New Flow detected: Save flow signature, mark hasDropped = 1
+                        reg_sig.write(hash_idx, signature);
+                        reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
+                        reg_gapStart.write(hash_idx, hdr.tcp.seqNo);
+                        reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
                         reg_n_noRTX.write(hash_idx, 0);
-                        reg_hasDropped.write(hash_idx, 0);
-                        ipv6_nhop.apply();
-                    } else if (calculated_distrust >= DISTRUST_THRESHOLD_BLOCKED) {
-                        // Spoofer blocked!
-                        drop();
-                    } else {
-                        // Update f_dup statistics
-                        bit<32> next_total = r_total_pkts + 1;
-                        bit<5> next_dup = r_dup_pkts;
-                        if (hdr.tcp.seqNo == r_last_seq) {
-                            next_dup = r_dup_pkts + 1;
-                        }
-                        reg_total_pkts.write(hash_idx, next_total);
-                        reg_dup_pkts.write(hash_idx, next_dup);
+                        reg_hasDropped.write(hash_idx, 1);
+                        reg_H1.write(hash_idx, 0);
+                        reg_H2.write(hash_idx, 0);
+                        reg_total_pkts.write(hash_idx, 1);
+                        reg_dup_pkts.write(hash_idx, 0);
                         reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
 
-                        // f_dup check: numerator * T2 >= denominator means high repetition rate (T2 = 7)
-                        bit<32> threshold_check = (bit<32>)next_dup * 7;
-                        if (threshold_check >= next_total && next_total > 10) {
-                            // Penalty for excessive duplicates
-                            r_H2 = r_H2 + 1;
-                            reg_H2.write(hash_idx, r_H2);
-                            reg_dup_pkts.write(hash_idx, 0);
-                            reg_total_pkts.write(hash_idx, 1);
+                        // Trigger active drop
+                        drop();
+                    } else {
+                        bit<5> calculated_distrust;
+                        if (r_H2 + 1 >= r_H1) {
+                            calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
+                        } else {
+                            calculated_distrust = 0; // Clamped to 0
+                        }
+                        bit<32> tcp_next_seq = hdr.tcp.seqNo + tcp_payload_len;
+                        bit<32> gap_end = r_gapStart + (bit<32>)r_gapLen;
+                        bit<1> retransmits_gap = 0;
+                        if (r_hasDropped == 1) {
+                            if (r_gapLen == (bit<16>)0 && hdr.tcp.seqNo == r_gapStart && tcp_payload_len == 0) {
+                                retransmits_gap = 1;
+                            } else if (r_gapLen > (bit<16>)0 && hdr.tcp.seqNo <= r_gapStart && tcp_next_seq >= gap_end) {
+                                retransmits_gap = 1;
+                            }
                         }
 
-                        if (hdr.tcp.seqNo > r_maxSeq) {
-                            // New packet in the flow; only these packets are droppable.
-                            reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
-                            if (r_hasDropped == 1) {
-                                // Received another new packet while waiting for the retransmission of the dropped one.
-                                bit<8> next_n_noRTX = r_n_noRTX + 1;
-                                reg_n_noRTX.write(hash_idx, next_n_noRTX);
-                                if (next_n_noRTX >= N_NORTX_THRESHOLD_LEGITIMATE) {
-                                    // Increase H2 (mistrust)
-                                    r_H2 = r_H2 + 1;
-                                    reg_H2.write(hash_idx, r_H2);
-                                    // Reset n_noRTX
-                                    reg_n_noRTX.write(hash_idx, 0);
+                        if (retransmits_gap == 1) {
+                            // Legitimate flow retransmitted the actively dropped packet.
+                            r_H1 = r_H1 + 1;
+                            reg_H1.write(hash_idx, r_H1);
+                            reg_n_noRTX.write(hash_idx, 0);
+                            reg_hasDropped.write(hash_idx, 0);
+                            ipv6_nhop.apply();
+                        } else if (calculated_distrust >= DISTRUST_THRESHOLD_BLOCKED) {
+                            // Spoofer blocked!
+                            drop();
+                        } else {
+                            // Update f_dup statistics
+                            bit<32> next_total = r_total_pkts + 1;
+                            bit<5> next_dup = r_dup_pkts;
+                            if (hdr.tcp.seqNo == r_last_seq) {
+                                next_dup = r_dup_pkts + 1;
+                            }
+                            reg_total_pkts.write(hash_idx, next_total);
+                            reg_dup_pkts.write(hash_idx, next_dup);
+                            reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
+
+                            // f_dup check: numerator * T2 >= denominator means high repetition rate (T2 = 7)
+                            bit<32> threshold_check = (bit<32>)next_dup * 7;
+                            if (threshold_check >= next_total && next_total > 10) {
+                                // Penalty for excessive duplicates
+                                r_H2 = r_H2 + 1;
+                                reg_H2.write(hash_idx, r_H2);
+                                reg_dup_pkts.write(hash_idx, 0);
+                                reg_total_pkts.write(hash_idx, 1);
+                            }
+
+                            if (hdr.tcp.seqNo > r_maxSeq) {
+                                // New packet in the flow; only these packets are droppable.
+                                reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
+                                if (r_hasDropped == 1) {
+                                    // Received another new packet while waiting for the retransmission of the dropped one.
+                                    bit<8> next_n_noRTX = r_n_noRTX + 1;
+                                    reg_n_noRTX.write(hash_idx, next_n_noRTX);
+                                    if (next_n_noRTX >= N_NORTX_THRESHOLD_LEGITIMATE) {
+                                        // Increase H2 (mistrust)
+                                        r_H2 = r_H2 + 1;
+                                        reg_H2.write(hash_idx, r_H2);
+                                        // Reset n_noRTX
+                                        reg_n_noRTX.write(hash_idx, 0);
+                                    }
                                 }
-                            }
 
-                            // Re-calculate distrust dynamically after updates
-                            if (r_H2 + 1 >= r_H1) {
-                                calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
-                            } else {
-                                calculated_distrust = 0;
-                            }
+                                // Re-calculate distrust dynamically after updates
+                                if (r_H2 + 1 >= r_H1) {
+                                    calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
+                                } else {
+                                    calculated_distrust = 0;
+                                }
 
-                            // Probabilistic drop (5%) if in ambiguous state (distrust > 0)
-                            if (calculated_distrust > 0) {
-                                bit<8> rand_val;
-                                random(rand_val, (bit<8>)0, (bit<8>)100);
-                                if (rand_val < (bit<8>)5) {
-                                    // Trigger active drop for sampling
-                                    reg_gapStart.write(hash_idx, hdr.tcp.seqNo);
-                                    reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
-                                    reg_hasDropped.write(hash_idx, 1);
-                                    drop();
+                                // Probabilistic drop (5%) if in ambiguous state (distrust > 0)
+                                if (calculated_distrust > 0) {
+                                    bit<8> rand_val;
+                                    random(rand_val, (bit<8>)0, (bit<8>)100);
+                                    if (rand_val < (bit<8>)5) {
+                                        // Trigger active drop for sampling
+                                        reg_gapStart.write(hash_idx, hdr.tcp.seqNo);
+                                        reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
+                                        reg_hasDropped.write(hash_idx, 1);
+                                        drop();
+                                    } else {
+                                        ipv6_nhop.apply();
+                                    }
                                 } else {
                                     ipv6_nhop.apply();
                                 }
                             } else {
+                                // Duplicate or unrelated retransmission; not droppable by P4Drop.
                                 ipv6_nhop.apply();
                             }
-                        } else {
-                            // Duplicate or unrelated retransmission; not droppable by P4Drop.
-                            ipv6_nhop.apply();
                         }
                     }
-                }
                 }
             } else {
                 // Non-TCP IPv6 packets, just forward
