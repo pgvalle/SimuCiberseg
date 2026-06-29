@@ -3,11 +3,11 @@ import socket
 import sys
 import time
 
+from config import PAYLOAD_SIZE, RECV_PORT, SIMULATION_END
 from packet_utils import build_ethernet_header, build_ipv6_tcp
 
-server_ip = sys.argv[1]
-port = int(sys.argv[2])
-spoofed_ip = "2001:db8:2::99"
+recv_ip = sys.argv[1]
+spoofed_ip = "2001:db9:2::99"
 start_time = time.time()
 
 os.system("echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null")
@@ -23,16 +23,16 @@ s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
 s.bind(("h2-eth0", 0))
 
 eth_hdr = build_ethernet_header("00:04:00:00:02:01", "00:04:00:00:01:01", 0x86DD)
-payload = b"x" * 512
+payload = b"x" * PAYLOAD_SIZE
 seq = 0
 
-while time.time() - start_time < 60.0:
+while time.time() - start_time < SIMULATION_END:
     ip_tcp_payload = build_ipv6_tcp(
-        spoofed_ip, server_ip, 50000, port, "S", seq, payload=payload
+        spoofed_ip, recv_ip, 50000, RECV_PORT, "S", seq, payload=payload
     )
     pkt = eth_hdr + ip_tcp_payload
     s.sendall(pkt)
-    seq += 512
+    seq += PAYLOAD_SIZE
     time.sleep(0.001)
 
 s.close()

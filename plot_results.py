@@ -1,6 +1,6 @@
-import glob
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import scipy.stats as st
@@ -10,31 +10,46 @@ try:
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from scapy.all import IP, TCP, IPv6, rdpcap
+    from scapy.all import IP, TCP, IPv6
 except ImportError:
     print("Please install matplotlib, scapy, numpy, scipy")
     sys.exit(1)
 
 
+MIXED_RATIOS = ["0.1", "0.2", "0.5"]
+MAX_TIME = 120
+SENT_IFACE = "s1-eth2"
+RECV_IFACE = "s1-eth1"
+
+
 def find_pcap(base_dir, iface_prefix, suffix):
-    pattern = os.path.join(base_dir, f"{iface_prefix}_{suffix}.pcap")
-    files = glob.glob(pattern)
-    if files:
-        return files[0]
+    pcap = Path(base_dir) / f"{iface_prefix}_{suffix}.pcap"
+    return str(pcap) if pcap.exists() else None
+
+
+def legit_ip_for(exp_name=None, is_v6=False):
+    if is_v6 or exp_name == "v6_ext":
+        return "2001:db8:2::101"
+    return "10.0.2.101"
+
+
+def tcp_source(packet, is_v6=False):
+    if is_v6:
+        if IPv6 in packet and TCP in packet:
+            return packet[IPv6].src
+    elif IP in packet and TCP in packet:
+        return packet[IP].src
     return None
 
 
-def analyze_single_run(log_dir, is_v6=False):
-    sent_pcap = find_pcap(log_dir, "s1-eth2", "out")
-    recv_pcap = find_pcap(log_dir, "s1-eth1", "in")
+def analyze_mixed_run(log_dir, is_v6=False):
+    sent_pcap = find_pcap(log_dir, SENT_IFACE, "out")
+    recv_pcap = find_pcap(log_dir, RECV_IFACE, "in")
 
     if not sent_pcap or not recv_pcap:
         return None
 
-    if is_v6:
-        legit_ip = "2001:db8:2::101"
-    else:
-        legit_ip = "10.0.2.101"
+    legit_ip = legit_ip_for(is_v6=is_v6)
 
     try:
         from scapy.all import PcapReader
@@ -46,18 +61,13 @@ def analyze_single_run(log_dir, is_v6=False):
     try:
         with PcapReader(sent_pcap) as reader:
             for p in reader:
-                if is_v6:
-                    if IPv6 in p and TCP in p:
-                        if p[IPv6].src == legit_ip:
-                            legit_sent += 1
-                        else:
-                            attack_sent += 1
+                src = tcp_source(p, is_v6=is_v6)
+                if src is None:
+                    continue
+                if src == legit_ip:
+                    legit_sent += 1
                 else:
-                    if IP in p and TCP in p:
-                        if p[IP].src == legit_ip:
-                            legit_sent += 1
-                        else:
-                            attack_sent += 1
+                    attack_sent += 1
     except Exception:
         pass
 
@@ -66,18 +76,13 @@ def analyze_single_run(log_dir, is_v6=False):
     try:
         with PcapReader(recv_pcap) as reader:
             for p in reader:
-                if is_v6:
-                    if IPv6 in p and TCP in p:
-                        if p[IPv6].src == legit_ip:
-                            legit_recv += 1
-                        else:
-                            attack_recv += 1
+                src = tcp_source(p, is_v6=is_v6)
+                if src is None:
+                    continue
+                if src == legit_ip:
+                    legit_recv += 1
                 else:
-                    if IP in p and TCP in p:
-                        if p[IP].src == legit_ip:
-                            legit_recv += 1
-                        else:
-                            attack_recv += 1
+                    attack_recv += 1
     except Exception:
         pass
 
@@ -88,108 +93,77 @@ def analyze_single_run(log_dir, is_v6=False):
     return (ddr, fnr)
 
 
-def analyze_single_spoofed(exp_name):
+def packet_count_series(log_dir, is_v6=False, source_filter=None, max_time=MAX_TIME):
+    sent_pcap = find_pcap(log_dir, SENT_IFACE, "out")
+    recv_pcap = find_pcap(log_dir, RECV_IFACE, "in")
+
+    if not sent_pcap or not recv_pcap:
+        return None
+
+    from scapy.all import PcapReader
+
+    start_t = None
+    for pcap in (sent_pcap, recv_pcap):
+        try:
+            with PcapReader(pcap) as reader:
+                for packet in reader:
+                    src = tcp_source(packet, is_v6=is_v6)
+                    if src is None:
+                        continue
+                    if source_filter is None or source_filter(src):
+                        start_t = float(packet.time)
+                        break
+        except Exception:
+            pass
+        if start_t is not None:
+            break
+
+    if start_t is None:
+        return None
+
+    def count_bins(pcap):
+        bins = [0] * max_time
+        try:
+            with PcapReader(pcap) as reader:
+                for packet in reader:
+                    src = tcp_source(packet, is_v6=is_v6)
+                    if src is None:
+                        continue
+                    if source_filter is not None and not source_filter(src):
+                        continue
+                    t = int(float(packet.time) - start_t)
+                    if 0 <= t < max_time:
+                        bins[t] += 1
+        except Exception:
+            pass
+        return bins
+
+    return count_bins(sent_pcap), count_bins(recv_pcap)
+
+
+def plot_packet_count_series(exp_name, scenario, title_subject, flow_label, source_filter):
     runs = [d for d in os.listdir(f"out/{exp_name}") if d.startswith("run_")]
     if not runs:
         return
 
     is_v6 = exp_name == "v6_ext"
-    if is_v6:
-        legit_ip = "2001:db8:2::101"
-    else:
-        legit_ip = "10.0.2.101"
+    legit_ip = legit_ip_for(exp_name)
 
-    max_time = 60
+    max_time = MAX_TIME
     sent_bins_all = []
     recv_bins_all = []
 
-    from scapy.all import PcapReader
-
-    # Check if we have the necessary classes imported
-    try:
-        from scapy.all import IP, TCP, IPv6
-    except ImportError:
-        return
-
     for run in runs:
-        log_dir = f"out/{exp_name}/{run}/single"
-        sent_pcap = find_pcap(log_dir, "s1-eth2", "out")
-        recv_pcap = find_pcap(log_dir, "s1-eth1", "in")
-
-        if not sent_pcap or not recv_pcap:
+        log_dir = f"out/{exp_name}/{run}/{scenario}"
+        series = packet_count_series(
+            log_dir,
+            is_v6=is_v6,
+            source_filter=lambda src: source_filter(src, legit_ip),
+            max_time=max_time,
+        )
+        if series is None:
             continue
-
-        sent_bins = [0] * max_time
-        recv_bins = [0] * max_time
-
-        start_t = None
-        try:
-            with PcapReader(sent_pcap) as reader:
-                for p in reader:
-                    if is_v6:
-                        has_ip = IPv6 in p and TCP in p
-                        src = p[IPv6].src if has_ip else None
-                    else:
-                        has_ip = IP in p and TCP in p
-                        src = p[IP].src if has_ip else None
-
-                    if has_ip and src != legit_ip:
-                        start_t = float(p.time)
-                        break
-        except Exception:
-            pass
-
-        if start_t is None:
-            try:
-                with PcapReader(recv_pcap) as reader:
-                    for p in reader:
-                        if is_v6:
-                            has_ip = IPv6 in p and TCP in p
-                            src = p[IPv6].src if has_ip else None
-                        else:
-                            has_ip = IP in p and TCP in p
-                            src = p[IP].src if has_ip else None
-
-                        if has_ip and src != legit_ip:
-                            start_t = float(p.time)
-                            break
-            except Exception:
-                pass
-
-        if start_t is not None:
-            try:
-                with PcapReader(sent_pcap) as reader:
-                    for p in reader:
-                        if is_v6:
-                            has_ip = IPv6 in p and TCP in p
-                            src = p[IPv6].src if has_ip else None
-                        else:
-                            has_ip = IP in p and TCP in p
-                            src = p[IP].src if has_ip else None
-
-                        if has_ip and src != legit_ip:
-                            t = int(float(p.time) - start_t)
-                            if 0 <= t < max_time:
-                                sent_bins[t] += 1
-            except Exception:
-                pass
-
-            try:
-                with PcapReader(recv_pcap) as reader:
-                    for p in reader:
-                        if is_v6:
-                            has_ip = IPv6 in p and TCP in p
-                            src = p[IPv6].src if has_ip else None
-                        else:
-                            has_ip = IP in p and TCP in p
-                            src = p[IP].src if has_ip else None
-
-                        if has_ip and src != legit_ip:
-                            t = int(float(p.time) - start_t)
-                            if 0 <= t < max_time:
-                                recv_bins[t] += 1
-            except Exception:
-                pass
+        sent_bins, recv_bins = series
 
         sent_bins_all.append(sent_bins)
         recv_bins_all.append(recv_bins)
@@ -199,16 +173,20 @@ def analyze_single_spoofed(exp_name):
         recv_mean = np.mean(recv_bins_all, axis=0)
 
         sent_err = (
-            st.sem(sent_bins_all, axis=0) if len(runs) > 1 else np.zeros(max_time)
+            st.sem(sent_bins_all, axis=0)
+            if len(sent_bins_all) > 1
+            else np.zeros(max_time)
         )
         recv_err = (
-            st.sem(recv_bins_all, axis=0) if len(runs) > 1 else np.zeros(max_time)
+            st.sem(recv_bins_all, axis=0)
+            if len(recv_bins_all) > 1
+            else np.zeros(max_time)
         )
 
         time_axis = np.arange(max_time)
 
         plt.figure(figsize=(8, 5))
-        plt.plot(time_axis, sent_mean, label="Enviado (Atacante)", color="blue")
+        plt.plot(time_axis, sent_mean, label=f"Enviado ({flow_label})", color="blue")
         plt.plot(time_axis, recv_mean, label="Recebido (Servidor)", color="red")
 
         plt.fill_between(
@@ -232,22 +210,44 @@ def analyze_single_spoofed(exp_name):
         is_ext = "ext" in exp_name
         impl_name = "P4DropExt" if is_ext else "P4Drop"
         proto = "IPv6" if "v6" in exp_name else "IPv4"
-        run_suffix = "Execuções" if len(runs) > 1 else "Execução"
+        plotted_runs = len(sent_bins_all)
+        run_suffix = "Execuções" if plotted_runs > 1 else "Execução"
         plt.title(
-            f"{impl_name} - Eficácia de Fluxo de Atacante Único ({proto}) ({len(runs)} {run_suffix})"
+            f"{impl_name} - {title_subject} ({proto}) ({plotted_runs} {run_suffix})"
         )
 
         plt.grid(True, alpha=0.3)
         plt.legend()
         plt.tight_layout()
-        plt.savefig(f"out/{exp_name}_single.png")
+        plt.savefig(f"out/{exp_name}_{scenario}.png")
         plt.close()
 
 
-def aggregate_and_plot(exp_name):
-    analyze_single_spoofed(exp_name)
+def analyze_spoofed(exp_name):
+    plot_packet_count_series(
+        exp_name,
+        "spoof",
+        "Eficácia de Fluxo de Atacante Único",
+        "Atacante",
+        lambda src, legit_ip: src != legit_ip,
+    )
 
-    ratios = ["0.0", "0.1", "0.2", "0.5"]
+
+def analyze_legit(exp_name):
+    plot_packet_count_series(
+        exp_name,
+        "legit",
+        "Fluxo Legítimo Único",
+        "Legítimo",
+        lambda src, legit_ip: src == legit_ip,
+    )
+
+
+def aggregate_and_plot(exp_name):
+    analyze_spoofed(exp_name)
+    analyze_legit(exp_name)
+
+    ratios = MIXED_RATIOS
     ddr_data = {r: [] for r in ratios}
     fnr_data = {r: [] for r in ratios}
 
@@ -259,7 +259,7 @@ def aggregate_and_plot(exp_name):
     for run in runs:
         for ratio in ratios:
             log_dir = f"out/{exp_name}/{run}/mixed_{ratio}"
-            res = analyze_single_run(log_dir, is_v6=(exp_name == "v6_ext"))
+            res = analyze_mixed_run(log_dir, is_v6=(exp_name == "v6_ext"))
             if res:
                 ddr, fnr = res
                 ddr_data[ratio].append(ddr)

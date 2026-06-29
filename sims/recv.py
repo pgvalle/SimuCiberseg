@@ -1,18 +1,18 @@
 import socket
-import sys
 import threading
 import time
 
-port = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+from config import PAYLOAD_SIZE, RECV_PORT
+
 start_time = time.time()
 
 
 def handle_conn(conn, addr):
     ip, sport = addr
-    print("Accepted connection from %s:%s" % addr)
+    print("Accepted connection from %s:%s" % (ip, sport))
     try:
         while True:
-            data = conn.recv(512)
+            data = conn.recv(PAYLOAD_SIZE)
             if len(data) == 0:
                 break
             rel_time = time.time() - start_time
@@ -21,15 +21,15 @@ def handle_conn(conn, addr):
         print("Socket error with %s:%s %s" % (ip, sport, e))
     finally:
         conn.close()
-        print("Connection closed with %s:%s" % addr)
+        print("Connection closed with %s:%s" % (ip, sport))
 
 
 def listen():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("0.0.0.0", port))
+    sock.bind(("0.0.0.0", RECV_PORT))
     sock.listen(200)
-    print("Listening on port %d..." % port)
+    print("Listening on port %d..." % RECV_PORT)
 
     try:
         while True:

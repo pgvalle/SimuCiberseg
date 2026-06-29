@@ -3,12 +3,13 @@ import socket
 import sys
 import time
 
+from config import PAYLOAD_SIZE
 from packet_utils import build_ethernet_header, build_ipv6_tcp
 
 server_ip = sys.argv[1]
 port = int(sys.argv[2])
 n = int(sys.argv[3])
-ip = "2001:db8:2::99"
+ip = "2001:db9:2::99"
 
 os.system("echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null")
 os.system("echo 0 > /proc/sys/net/ipv6/conf/h2-eth0/disable_ipv6 2>/dev/null")
@@ -23,7 +24,7 @@ s = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
 s.bind(("h2-eth0", 0))
 
 eth_hdr = build_ethernet_header("00:04:00:00:02:01", "00:04:00:00:01:01", 0x86DD)
-payload = b"x" * 512
+payload = b"x" * PAYLOAD_SIZE
 seq = 0
 
 for i in range(n):
@@ -32,7 +33,7 @@ for i in range(n):
     )
     pkt = eth_hdr + ip_tcp_payload
     s.sendall(pkt)
-    seq += 512
+    seq += PAYLOAD_SIZE
     time.sleep(0.001)
 
 s.close()
