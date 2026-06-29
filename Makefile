@@ -3,7 +3,8 @@ PYTHON = $(VENV)/bin/python
 PIP = $(VENV)/bin/pip
 
 RUNS ?= 3
-RATIOS = 0.0 0.1 0.2 0.5
+# RATIOS = 0.0 0.1 0.2 0.5
+RATIOS = 0.0
 
 .PHONY: all setup v4_base v4_ext v6_ext plot clean
 
@@ -18,11 +19,11 @@ v4_base:
 	@for i in $$(seq 1 $(RUNS)); do \
 		echo "=== v4_base Run $$i / $(RUNS) ==="; \
 		mkdir -p out/v4_base/run_$$i/single; \
-		cp sims/v4_base_single.json sims/p4app.json; \
+		cp sims/p4drop-ipv4-single.json sims/p4app.json; \
 		P4APP_LOGDIR=./out/v4_base/run_$$i/single ./p4app/p4app run sims; \
 		for ratio in $(RATIOS); do \
 			mkdir -p out/v4_base/run_$$i/mixed_$$ratio; \
-			sed "s/__RATIO__/$$ratio/g" sims/v4_base_mixed.json > sims/p4app.json; \
+			sed "s/__RATIO__/$$ratio/g" sims/p4drop-ipv4-mixed.json > sims/p4app.json; \
 			P4APP_LOGDIR=./out/v4_base/run_$$i/mixed_$$ratio ./p4app/p4app run sims; \
 		done \
 	done
@@ -32,11 +33,11 @@ v4_ext:
 	@for i in $$(seq 1 $(RUNS)); do \
 		echo "=== v4_ext Run $$i / $(RUNS) ==="; \
 		mkdir -p out/v4_ext/run_$$i/single; \
-		cp sims/v4_ext_single.json sims/p4app.json; \
+		cp sims/p4drop-ext-ipv4-single.json sims/p4app.json; \
 		P4APP_LOGDIR=./out/v4_ext/run_$$i/single ./p4app/p4app run sims; \
 		for ratio in $(RATIOS); do \
 			mkdir -p out/v4_ext/run_$$i/mixed_$$ratio; \
-			sed "s/__RATIO__/$$ratio/g" sims/v4_ext_mixed.json > sims/p4app.json; \
+			sed "s/__RATIO__/$$ratio/g" sims/p4drop-ext-ipv4-mixed.json > sims/p4app.json; \
 			P4APP_LOGDIR=./out/v4_ext/run_$$i/mixed_$$ratio ./p4app/p4app run sims; \
 		done \
 	done
@@ -46,11 +47,11 @@ v6_ext:
 	@for i in $$(seq 1 $(RUNS)); do \
 		echo "=== v6_ext Run $$i / $(RUNS) ==="; \
 		mkdir -p out/v6_ext/run_$$i/single; \
-		cp sims/v6_ext_single.json sims/p4app.json; \
+		cp sims/p4drop-ext-ipv6-single.json sims/p4app.json; \
 		P4APP_LOGDIR=./out/v6_ext/run_$$i/single ./p4app/p4app run sims; \
 		for ratio in $(RATIOS); do \
 			mkdir -p out/v6_ext/run_$$i/mixed_$$ratio; \
-			sed "s/__RATIO__/$$ratio/g" sims/v6_ext_mixed.json > sims/p4app.json; \
+			sed "s/__RATIO__/$$ratio/g" sims/p4drop-ext-ipv6-mixed.json > sims/p4app.json; \
 			P4APP_LOGDIR=./out/v6_ext/run_$$i/mixed_$$ratio ./p4app/p4app run sims; \
 		done \
 	done

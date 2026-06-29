@@ -204,8 +204,29 @@ control MyIngress(inout headers hdr,
                 drop();
             } else if (hdr.tcp.isValid()) {
                 // Compute TCP payload size
-                bit<32> tcp_payload_len = (bit<32>)hdr.ipv4.totalLen - (bit<32>)(hdr.ipv4.ihl * 4) - (bit<32>)(hdr.tcp.dataOffset * 4);
-                
+                bit<32> tcp_payload_len = (bit<32>)hdr.ipv4.totalLen - ((bit<32>)hdr.ipv4.ihl * (bit<32>)4) - ((bit<32>)hdr.tcp.dataOffset * (bit<32>)4);
+
+                bit<1> is_pure_ack = 0;
+                if (hdr.tcp.flags == (bit<6>)16 && tcp_payload_len == 0) {
+                    is_pure_ack = 1;
+                }
+
+                if (is_pure_ack == 1) {
+                    // Associate pure ACKs with the reverse data flow, but never
+                    // use them as retransmission evidence.
+                    bit<32> ack_hash_idx;
+                    hash(ack_hash_idx, HashAlgorithm.crc32, (bit<32>)0,
+                         { hdr.ipv4.dstAddr, hdr.ipv4.srcAddr, hdr.tcp.dstPort, hdr.tcp.srcPort },
+                         (bit<32>)FLOW_TABLE_SIZE);
+
+                    bit<32> ack_r_srcIP;
+                    bit<32> ack_r_dstIP;
+                    reg_srcIP.read(ack_r_srcIP, ack_hash_idx);
+                    reg_dstIP.read(ack_r_dstIP, ack_hash_idx);
+                    ipv4_nhop.apply();
+                } else if (tcp_payload_len == 0) {
+                    ipv4_nhop.apply();
+                } else {
                 // Hash index calculation
                 bit<32> hash_idx;
                 hash(hash_idx, HashAlgorithm.crc32, (bit<32>)0, 
@@ -269,8 +290,25 @@ control MyIngress(inout headers hdr,
                     } else {
                         calculated_distrust = 0; // Clamped to 0
                     }
+                    bit<32> tcp_next_seq = hdr.tcp.seqNo + tcp_payload_len;
+                    bit<32> gap_end = r_gapStart + (bit<32>)r_gapLen;
+                    bit<1> retransmits_gap = 0;
+                    if (r_hasDropped == 1) {
+                        if (r_gapLen == (bit<14>)0 && hdr.tcp.seqNo == r_gapStart && tcp_payload_len == 0) {
+                            retransmits_gap = 1;
+                        } else if (r_gapLen > (bit<14>)0 && hdr.tcp.seqNo <= r_gapStart && tcp_next_seq >= gap_end) {
+                            retransmits_gap = 1;
+                        }
+                    }
 
-                    if (calculated_distrust >= DISTRUST_THRESHOLD_BLOCKED) {
+                    if (retransmits_gap == 1) {
+                        // Legitimate flow retransmitted the actively dropped packet.
+                        r_H1 = r_H1 + 1;
+                        reg_H1.write(hash_idx, r_H1);
+                        reg_n_noRTX.write(hash_idx, 0);
+                        reg_hasDropped.write(hash_idx, 0);
+                        ipv4_nhop.apply();
+                    } else if (calculated_distrust >= DISTRUST_THRESHOLD_BLOCKED) {
                         // Spoofer blocked!
                         drop();
                     } else {
@@ -294,33 +332,22 @@ control MyIngress(inout headers hdr,
                             reg_total_pkts.write(hash_idx, 1);
                         }
 
-                        // Check if it's a retransmission of the actively dropped packet
-                        if (hdr.tcp.seqNo == r_gapStart && (bit<14>)tcp_payload_len == r_gapLen && r_hasDropped == 1) {
-                            // Legitimate flow retransmitted the dropped packet!
-                            // Increase H1 (legitimate trust)
-                            r_H1 = r_H1 + 1;
-                            reg_H1.write(hash_idx, r_H1);
-                            reg_n_noRTX.write(hash_idx, 0);
-                            reg_hasDropped.write(hash_idx, 0); // Active drop test resolved
-                            ipv4_nhop.apply();
-                        } else {
-                            if (hdr.tcp.seqNo > r_maxSeq) {
-                                // New packet in the flow
-                                reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
-                                if (r_hasDropped == 1) {
-                                    // Received another new packet while waiting for the retransmission of the dropped one.
-                                    bit<5> next_n_noRTX = r_n_noRTX + 1;
-                                    reg_n_noRTX.write(hash_idx, next_n_noRTX);
-                                    if (next_n_noRTX >= N_NORTX_THRESHOLD_LEGITIMATE) {
-                                        // Increase H2 (mistrust)
-                                        r_H2 = r_H2 + 1;
-                                        reg_H2.write(hash_idx, r_H2);
-                                        // Reset n_noRTX
-                                        reg_n_noRTX.write(hash_idx, 0);
-                                    }
+                        if (hdr.tcp.seqNo > r_maxSeq) {
+                            // New packet in the flow; only these packets are droppable.
+                            reg_maxSeq.write(hash_idx, hdr.tcp.seqNo);
+                            if (r_hasDropped == 1) {
+                                // Received another new packet while waiting for the retransmission of the dropped one.
+                                bit<5> next_n_noRTX = r_n_noRTX + 1;
+                                reg_n_noRTX.write(hash_idx, next_n_noRTX);
+                                if (next_n_noRTX >= N_NORTX_THRESHOLD_LEGITIMATE) {
+                                    // Increase H2 (mistrust)
+                                    r_H2 = r_H2 + 1;
+                                    reg_H2.write(hash_idx, r_H2);
+                                    // Reset n_noRTX
+                                    reg_n_noRTX.write(hash_idx, 0);
                                 }
                             }
-                            
+
                             // Re-calculate distrust dynamically after updates
                             if (r_H2 + 1 >= r_H1) {
                                 calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
@@ -344,8 +371,12 @@ control MyIngress(inout headers hdr,
                             } else {
                                 ipv4_nhop.apply();
                             }
+                        } else {
+                            // Duplicate or unrelated retransmission; not droppable by P4Drop.
+                            ipv4_nhop.apply();
                         }
                     }
+                }
                 }
             } else {
                 // Non-TCP IPv4 packets, just forward
