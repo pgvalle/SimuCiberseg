@@ -1,0 +1,2 @@
+table_add ipv6_nhop ipv6_forward 2001:db8:1::101 => 00:04:00:00:01:01 1
+table_add ipv6_nhop ipv6_forward 2001:db8:2::101 => 00:04:00:00:02:01 2
