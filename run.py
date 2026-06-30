@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import shutil
 import subprocess
-import argparse
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -12,6 +12,7 @@ import scipy.stats as st
 
 try:
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from scapy.all import IP, TCP, IPv6, PcapReader
@@ -176,7 +177,9 @@ def save_validation_plot(out_dir, experiments):
     axes[1].set_ylim(0, 105)
     axes[1].grid(axis="y", alpha=0.25)
 
-    title_suffix = " (com backlog)" if "backlog" in out_dir.lower() else " (sem backlog)"
+    title_suffix = (
+        " (com backlog)" if "backlog" in out_dir.lower() else " (sem backlog)"
+    )
     fig.suptitle(f"Desempenho no Cenário Misto{title_suffix}")
     fig.tight_layout()
     fig.savefig(f"{out_dir}/validation_correctness.png")
@@ -290,7 +293,9 @@ def save_flow_block_speed_plot(out_dir, experiments):
             alpha=0.15,
         )
 
-    title_suffix = " (com backlog)" if "backlog" in out_dir.lower() else " (sem backlog)"
+    title_suffix = (
+        " (com backlog)" if "backlog" in out_dir.lower() else " (sem backlog)"
+    )
     ax.set_title(f"Taxa de entrega de pacotes nos fluxos de ataque{title_suffix}")
     ax.set_xlabel("Índice do pacote no fluxo (seq. cronológica)")
     ax.set_ylabel("Probabilidade de entrega (%)")
@@ -309,7 +314,9 @@ def generate_plots(out_dir, experiment_filter="all"):
         experiments = [e for e in experiments if e[0] == experiment_filter]
 
     if not experiments:
-        print(f"No experiment outputs found in {out_dir}/ for filter '{experiment_filter}'.")
+        print(
+            f"No experiment outputs found in {out_dir}/ for filter '{experiment_filter}'."
+        )
         return
 
     save_validation_plot(out_dir, experiments)
@@ -341,23 +348,28 @@ def run_sim(config_path, log_dir, env_extra=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run simulation experiments and generate plots.")
+    parser = argparse.ArgumentParser(
+        description="Run simulation experiments and generate plots."
+    )
     parser.add_argument(
-        "-e", "--experiment",
+        "-e",
+        "--experiment",
         choices=["all", "base", "ext", "ext_v6"],
         default="all",
-        help="Select a specific experiment to run (default: all)"
+        help="Select a specific experiment to run (default: all)",
     )
     parser.add_argument(
-        "-p", "--plot-only",
+        "-p",
+        "--plot-only",
         action="store_true",
-        help="Skip simulations and only generate/regenerate plots"
+        help="Skip simulations and only generate/regenerate plots",
     )
     parser.add_argument(
-        "-r", "--runs",
+        "-r",
+        "--runs",
         type=int,
         default=5,
-        help="Number of simulation runs (default: 5)"
+        help="Number of simulation runs (default: 5)",
     )
     args = parser.parse_args()
 
@@ -383,7 +395,9 @@ def main():
             for r in range(1, args.runs + 1):
                 # 1. Run attack with no_backlog model
                 current_step += 1
-                print(f"\n[Step {current_step}/{total_steps}] Mixed 0.1 (no_backlog) for {exp_name} run {r}...")
+                print(
+                    f"\n[Step {current_step}/{total_steps}] (no_backlog) for {exp_name} run {r}..."
+                )
                 run_sim(
                     config_path,
                     f"./out/no_backlog/{exp_name}/run_{r}",
@@ -392,7 +406,9 @@ def main():
 
                 # 2. Run attack with backlog model
                 current_step += 1
-                print(f"\n[Step {current_step}/{total_steps}] Mixed 0.1 (backlog) for {exp_name} run {r}...")
+                print(
+                    f"\n[Step {current_step}/{total_steps}] (backlog) for {exp_name} run {r}..."
+                )
                 run_sim(
                     config_path,
                     f"./out/backlog/{exp_name}/run_{r}",
