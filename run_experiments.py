@@ -7,13 +7,13 @@ import subprocess
 os.makedirs("out/no_backlog", exist_ok=True)
 os.makedirs("out/backlog", exist_ok=True)
 
-experiments = [
+EXPERIMENTS = [
     ("base", "sims/base.json"),
     ("ext", "sims/ext.json"),
     ("ext_v6", "sims/ext-v6.json"),
 ]
 
-runs = 5
+RUNS = 5
 
 
 def run_sim(config_path, log_dir, env_extra=None):
@@ -40,18 +40,18 @@ def run_sim(config_path, log_dir, env_extra=None):
 
 
 # Total progress tracker
-total_steps = len(experiments) * runs * 2  # mixed_no_backlog, mixed_backlog
+total_steps = len(EXPERIMENTS) * RUNS * 2  # no_backlog, backlog
 current_step = 0
 
-print(f"Starting experimental suite with {runs} runs of 90s simulations.")
+print(f"Starting experimental suite with {RUNS} runs of 90s simulations.")
 print(f"Total steps to execute: {total_steps}")
 
-for exp_name, config_path in experiments:
-    for r in range(1, runs + 1):
-        # 1. Run Mixed 0.1 no_backlog model
+for exp_name, config_path in EXPERIMENTS:
+    for r in range(1, RUNS + 1):
+        # 1. Run attack with no_backlog model
         current_step += 1
         print(
-            f"\n[Step {current_step}/{total_steps}] Mixed 0.1 (no_backlog) for {exp_name} run {r}..."
+            f"\n[Step {current_step}/{total_steps}] (no_backlog) for {exp_name} run {r}..."
         )
         run_sim(
             config_path,
@@ -59,10 +59,10 @@ for exp_name, config_path in experiments:
             {"ATTACK_MODEL": "no_backlog"},
         )
 
-        # 2. Run Mixed 0.1 Backlog model
+        # 2. Run attack with backlog model
         current_step += 1
         print(
-            f"\n[Step {current_step}/{total_steps}] (Backlog) for {exp_name} run {r}..."
+            f"\n[Step {current_step}/{total_steps}] (backlog) for {exp_name} run {r}..."
         )
         run_sim(
             config_path,
@@ -71,14 +71,17 @@ for exp_name, config_path in experiments:
         )
 
 print("\n================ All Simulations Finished ================")
+
 print("Generating no_backlog plots...")
 subprocess.run(
     [".pyenv/bin/python", "plot_results.py"],
     env={"OUT_DIR": "out/no_backlog", "PYTHONPATH": "."},
 )
-print("Generating Backlog plots...")
+
+print("Generating backlog plots...")
 subprocess.run(
     [".pyenv/bin/python", "plot_results.py"],
     env={"OUT_DIR": "out/backlog", "PYTHONPATH": "."},
 )
+
 print("Plots generated successfully under out/no_backlog/ and out/backlog/.")

@@ -3,10 +3,10 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-OUT_DIR = os.environ.get("OUT_DIR", "out")
-
 import numpy as np
 import scipy.stats as st
+
+OUT_DIR = os.environ.get("OUT_DIR", "out")
 
 try:
     import matplotlib
@@ -24,8 +24,6 @@ EXPERIMENTS = [
     ("ext", "P4DropExt IPv4"),
     ("ext_v6", "P4DropExt IPv6"),
 ]
-MIXED_RATIOS = ["0.0", "0.1", "0.2", "0.5"]
-ATTACK_RATIOS = ["0.1", "0.2", "0.5"]
 SENT_PCAP = ("s1-eth2", "out")
 RECV_PCAP = ("s1-eth1", "in")
 
@@ -137,7 +135,9 @@ def mean_and_sem(values):
 
 
 def available_experiments():
-    return [(name, label) for name, label in EXPERIMENTS if Path(OUT_DIR, name).exists()]
+    return [
+        (name, label) for name, label in EXPERIMENTS if Path(OUT_DIR, name).exists()
+    ]
 
 
 def save_validation_plot(experiments):
@@ -176,7 +176,9 @@ def save_validation_plot(experiments):
     axes[1].set_ylim(0, 105)
     axes[1].grid(axis="y", alpha=0.25)
 
-    title_suffix = " (com backlog)" if "backlog" in OUT_DIR.lower() else " (sem backlog)"
+    title_suffix = (
+        " (com backlog)" if "backlog" in OUT_DIR.lower() else " (sem backlog)"
+    )
     fig.suptitle(f"Desempenho no Cenário Misto{title_suffix}")
     fig.tight_layout()
     fig.savefig(f"{OUT_DIR}/validation_correctness.png")
@@ -322,9 +324,7 @@ def save_flow_block_speed_plot(experiments):
             legit_ip = legit_ip_for(exp_name)
             is_v6 = exp_name == "ext_v6"
 
-            profiles = get_flow_delivery_profiles(
-                sent_pcap, recv_pcap, legit_ip, is_v6
-            )
+            profiles = get_flow_delivery_profiles(sent_pcap, recv_pcap, legit_ip, is_v6)
             all_profiles.extend(profiles)
 
         if not all_profiles:
@@ -335,7 +335,7 @@ def save_flow_block_speed_plot(experiments):
         sem = st.sem(profiles_arr, axis=0) * 100.0
         indices = np.arange(1, MAX_BLOCK_SPEED_INDEX + 1)
         color = colors.get(exp_name, None)
-        
+
         ax.plot(indices, delivery_rate, label=label, color=color, linewidth=2)
         # Add shaded band representing the Standard Error of the Mean (SEM)
         ax.fill_between(
@@ -343,10 +343,12 @@ def save_flow_block_speed_plot(experiments):
             np.clip(delivery_rate - sem, 0, 100),
             np.clip(delivery_rate + sem, 0, 100),
             color=color,
-            alpha=0.15
+            alpha=0.15,
         )
 
-    title_suffix = " (com backlog)" if "backlog" in OUT_DIR.lower() else " (sem backlog)"
+    title_suffix = (
+        " (com backlog)" if "backlog" in OUT_DIR.lower() else " (sem backlog)"
+    )
     ax.set_title(f"Taxa de entrega de pacotes nos fluxos de ataque{title_suffix}")
     ax.set_xlabel("Índice do pacote no fluxo (seq. cronológica)")
     ax.set_ylabel("Probabilidade de entrega (%)")
