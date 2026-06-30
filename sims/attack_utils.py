@@ -5,7 +5,7 @@ from config import ATTACK_RETRANSMIT_PROBABILITY, PAYLOAD_SIZE, RETRANSMIT_HISTO
 
 
 def next_attack_seq(state):
-    model = os.environ.get("ATTACK_MODEL", "netem")
+    model = os.environ.get("ATTACK_MODEL", "no_backlog")
 
     if model == "backlog":
         # Backlog spoof model (random choice from history)
@@ -20,7 +20,7 @@ def next_attack_seq(state):
             del history[0]
         return seq
     else:
-        # Netem spoof model (back-to-back duplicates)
+        # No_backlog spoof model (back-to-back duplicates)
         if "last_seq" in state and random.random() < ATTACK_RETRANSMIT_PROBABILITY:
             return state["last_seq"]
 
