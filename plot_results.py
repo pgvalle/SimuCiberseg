@@ -1,6 +1,9 @@
 import os
 import sys
+from collections import defaultdict
 from pathlib import Path
+
+OUT_DIR = os.environ.get("OUT_DIR", "out")
 
 import numpy as np
 import scipy.stats as st
@@ -17,9 +20,9 @@ except ImportError:
 
 
 EXPERIMENTS = [
-    ("v4_base", "P4Drop"),
-    ("v4_ext", "P4DropExt IPv4"),
-    ("v6_ext", "P4DropExt IPv6"),
+    ("base", "P4Drop"),
+    ("ext", "P4DropExt IPv4"),
+    ("ext_v6", "P4DropExt IPv6"),
 ]
 MIXED_RATIOS = ["0.0", "0.1", "0.2", "0.5"]
 ATTACK_RATIOS = ["0.1", "0.2", "0.5"]
@@ -33,7 +36,7 @@ def find_pcap(base_dir, iface_prefix, suffix):
 
 
 def legit_ip_for(exp_name):
-    if exp_name == "v6_ext":
+    if exp_name == "ext_v6":
         return "2001:db8:2::101"
     return "10.0.2.101"
 
@@ -48,16 +51,18 @@ def tcp_src_and_payload_len(packet, is_v6=False):
 
 
 def iter_runs(exp_name):
-    exp_dir = Path("out") / exp_name
+    exp_dir = Path(OUT_DIR) / exp_name
     if not exp_dir.exists():
         return []
-    return sorted(d.name for d in exp_dir.iterdir() if d.is_dir() and d.name.startswith("run_"))
+    return sorted(
+        d.name for d in exp_dir.iterdir() if d.is_dir() and d.name.startswith("run_")
+    )
 
 
 def count_payload_packets(pcap_path, exp_name, legit_ip):
     from scapy.all import PcapReader
 
-    is_v6 = exp_name == "v6_ext"
+    is_v6 = exp_name == "ext_v6"
     legit = 0
     attack = 0
 
@@ -77,8 +82,8 @@ def count_payload_packets(pcap_path, exp_name, legit_ip):
     return legit, attack
 
 
-def analyze_run(exp_name, scenario):
-    log_dir = Path("out") / exp_name / scenario
+def analyze_run(exp_name, run):
+    log_dir = Path(OUT_DIR) / exp_name / run
     sent_pcap = find_pcap(log_dir, *SENT_PCAP)
     recv_pcap = find_pcap(log_dir, *RECV_PCAP)
 
@@ -112,10 +117,10 @@ def metric_rates(counts):
     return ldr, alr
 
 
-def collect_metric(exp_name, scenario, metric_name):
+def collect_metric(exp_name, metric_name):
     values = []
     for run in iter_runs(exp_name):
-        counts = analyze_run(exp_name, f"{run}/{scenario}")
+        counts = analyze_run(exp_name, run)
         ldr, alr = metric_rates(counts)
         value = ldr if metric_name == "ldr" else alr
         if not np.isnan(value):
@@ -132,7 +137,7 @@ def mean_and_sem(values):
 
 
 def available_experiments():
-    return [(name, label) for name, label in EXPERIMENTS if Path("out", name).exists()]
+    return [(name, label) for name, label in EXPERIMENTS if Path(OUT_DIR, name).exists()]
 
 
 def save_validation_plot(experiments):
@@ -146,18 +151,18 @@ def save_validation_plot(experiments):
     spoof_errs = []
 
     for exp_name, _ in experiments:
-        mean, err = mean_and_sem(collect_metric(exp_name, "legit", "ldr"))
+        mean, err = mean_and_sem(collect_metric(exp_name, "ldr"))
         legit_means.append(mean)
         legit_errs.append(err)
 
-        mean, err = mean_and_sem(collect_metric(exp_name, "spoof", "alr"))
+        mean, err = mean_and_sem(collect_metric(exp_name, "alr"))
         spoof_means.append(mean)
         spoof_errs.append(err)
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
 
     axes[0].bar(x, legit_means, width, yerr=legit_errs, color="#2e7d32", capsize=4)
-    axes[0].set_title("Entrega de Trafego Legitimo")
+    axes[0].set_title("Entrega de Tráfego Legítimo")
     axes[0].set_ylabel("Pacotes recebidos / transmitidos (%)")
     axes[0].set_xticks(x)
     axes[0].set_xticklabels(labels, rotation=15, ha="right")
@@ -165,15 +170,16 @@ def save_validation_plot(experiments):
     axes[0].grid(axis="y", alpha=0.25)
 
     axes[1].bar(x, spoof_means, width, yerr=spoof_errs, color="#c62828", capsize=4)
-    axes[1].set_title("Vazamento de Ataque Spoofado")
+    axes[1].set_title("Vazamento de Tráfego Malicioso")
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(labels, rotation=15, ha="right")
     axes[1].set_ylim(0, 105)
     axes[1].grid(axis="y", alpha=0.25)
 
-    fig.suptitle("Validacao Basica das Implementacoes")
+    title_suffix = " (com backlog)" if "backlog" in OUT_DIR.lower() else " (sem backlog)"
+    fig.suptitle(f"Desempenho no Cenário Misto{title_suffix}")
     fig.tight_layout()
-    fig.savefig("out/validation_correctness.png")
+    fig.savefig(f"{OUT_DIR}/validation_correctness.png")
     plt.close(fig)
 
 
@@ -222,31 +228,146 @@ def save_mixed_plot(experiments, ratios, metric_name, ylabel, title, output_file
     plt.close()
 
 
+# ---------------------------------------------------------------------------
+# Flow block speed comparison
+# ---------------------------------------------------------------------------
+
+MAX_BLOCK_SPEED_INDEX = 150
+
+
+def get_flow_delivery_profiles(sent_pcap, recv_pcap, legit_ip, is_v6=False):
+    """Return lists of bools indicating if k-th packet of each flow was delivered."""
+    from scapy.all import PcapReader
+
+    sent_flows = defaultdict(list)
+    try:
+        with PcapReader(sent_pcap) as reader:
+            for pkt in reader:
+                if is_v6:
+                    if IPv6 not in pkt or TCP not in pkt:
+                        continue
+                    src = pkt[IPv6].src
+                else:
+                    if IP not in pkt or TCP not in pkt:
+                        continue
+                    src = pkt[IP].src
+
+                if len(bytes(pkt[TCP].payload)) == 0:
+                    continue
+                if src == legit_ip:
+                    continue
+
+                flow_key = (src, pkt[TCP].sport)
+                sent_flows[flow_key].append(pkt[TCP].seq)
+    except Exception as exc:
+        print(f"Warning: failed reading {sent_pcap}: {exc}")
+        return []
+
+    recv_counts = defaultdict(int)
+    try:
+        with PcapReader(recv_pcap) as reader:
+            for pkt in reader:
+                if is_v6:
+                    if IPv6 not in pkt or TCP not in pkt:
+                        continue
+                    src = pkt[IPv6].src
+                else:
+                    if IP not in pkt or TCP not in pkt:
+                        continue
+                    src = pkt[IP].src
+
+                if len(bytes(pkt[TCP].payload)) == 0:
+                    continue
+                if src == legit_ip:
+                    continue
+
+                flow_key = (src, pkt[TCP].sport)
+                recv_counts[(flow_key, pkt[TCP].seq)] += 1
+    except Exception as exc:
+        print(f"Warning: failed reading {recv_pcap}: {exc}")
+        return []
+
+    profiles = []
+    for flow_key, seqs in sent_flows.items():
+        profile = []
+        for seq in seqs[:MAX_BLOCK_SPEED_INDEX]:
+            count_key = (flow_key, seq)
+            if recv_counts[count_key] > 0:
+                profile.append(True)
+                recv_counts[count_key] -= 1
+            else:
+                profile.append(False)
+        if len(profile) < MAX_BLOCK_SPEED_INDEX:
+            profile += [False] * (MAX_BLOCK_SPEED_INDEX - len(profile))
+        profiles.append(profile)
+
+    return profiles
+
+
+def save_flow_block_speed_plot(experiments):
+    """Average flow delivery profiles over runs, and plot flow block speed."""
+    fig, ax = plt.subplots(figsize=(7.5, 4.8))
+
+    colors = {"base": "blue", "ext": "orange", "ext_v6": "green"}
+
+    for exp_name, label in experiments:
+        all_profiles = []
+        for run in iter_runs(exp_name):
+            log_dir = Path(OUT_DIR) / exp_name / run
+            sent_pcap = find_pcap(log_dir, *SENT_PCAP)
+            recv_pcap = find_pcap(log_dir, *RECV_PCAP)
+            if not sent_pcap or not recv_pcap:
+                continue
+
+            legit_ip = legit_ip_for(exp_name)
+            is_v6 = exp_name == "ext_v6"
+
+            profiles = get_flow_delivery_profiles(
+                sent_pcap, recv_pcap, legit_ip, is_v6
+            )
+            all_profiles.extend(profiles)
+
+        if not all_profiles:
+            continue
+
+        profiles_arr = np.array(all_profiles)
+        delivery_rate = np.mean(profiles_arr, axis=0) * 100.0
+        sem = st.sem(profiles_arr, axis=0) * 100.0
+        indices = np.arange(1, MAX_BLOCK_SPEED_INDEX + 1)
+        color = colors.get(exp_name, None)
+        
+        ax.plot(indices, delivery_rate, label=label, color=color, linewidth=2)
+        # Add shaded band representing the Standard Error of the Mean (SEM)
+        ax.fill_between(
+            indices,
+            np.clip(delivery_rate - sem, 0, 100),
+            np.clip(delivery_rate + sem, 0, 100),
+            color=color,
+            alpha=0.15
+        )
+
+    title_suffix = " (com backlog)" if "backlog" in OUT_DIR.lower() else " (sem backlog)"
+    ax.set_title(f"Taxa de entrega de pacotes nos fluxos de ataque{title_suffix}")
+    ax.set_xlabel("Índice do pacote no fluxo (seq. cronológica)")
+    ax.set_ylabel("Probabilidade de entrega (%)")
+    ax.set_ylim(-5, 105)
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(f"{OUT_DIR}/flow_block_speed.png")
+    plt.close(fig)
+    print(f"Saved {OUT_DIR}/flow_block_speed.png")
+
+
 def main():
     experiments = available_experiments()
     if not experiments:
-        print("No experiment outputs found in out/.")
+        print(f"No experiment outputs found in {OUT_DIR}/.")
         return
 
     save_validation_plot(experiments)
-    save_mixed_plot(
-        experiments,
-        MIXED_RATIOS,
-        "ldr",
-        "Entrega legitima (%)",
-        "Entrega de Trafego Legitimo em Cenario Misto",
-        "out/mixed_legitimate_delivery.png",
-    )
-    save_mixed_plot(
-        experiments,
-        ATTACK_RATIOS,
-        "alr",
-        "Vazamento de ataque (%)",
-        "Vazamento de Ataque em Cenario Misto",
-        "out/mixed_attack_leakage.png",
-    )
-
-    print("Plots saved in out/ directory.")
+    save_flow_block_speed_plot(experiments)
+    print(f"Plots saved in {OUT_DIR}/ directory.")
 
 
 if __name__ == "__main__":
