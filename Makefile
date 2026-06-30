@@ -2,70 +2,30 @@ VENV = .pyenv
 PYTHON = $(VENV)/bin/python
 PIP = $(VENV)/bin/pip
 
-RUNS ?= 3
-RATIOS = 0.0 0.1 0.2 0.5
+RUNS ?= 5
+EXP ?= all
 
-.PHONY: all setup v4_base v4_ext v6_ext plot clean
+.PHONY: all setup run run-base run-ext run-ext-v6 plot plot-base plot-ext plot-ext-v6 clean
 
-all: setup v4_base v4_ext v6_ext plot
+all: setup run
 
 setup:
 	python3 -m venv $(VENV)
 	$(PIP) install matplotlib scapy numpy scipy
 
-v4_base:
-	@echo "Running v4_base experiments for $(RUNS) runs..."
-	@for i in $$(seq 1 $(RUNS)); do \
-		echo "=== v4_base Run $$i / $(RUNS) ==="; \
-		mkdir -p out/v4_base/run_$$i/spoof; \
-		cp sims/base-spoof.json sims/p4app.json; \
-		P4APP_LOGDIR=./out/v4_base/run_$$i/spoof ./p4app/p4app run sims; \
-		mkdir -p out/v4_base/run_$$i/legit; \
-		cp sims/base-legit.json sims/p4app.json; \
-		P4APP_LOGDIR=./out/v4_base/run_$$i/legit ./p4app/p4app run sims; \
-		for ratio in $(RATIOS); do \
-			mkdir -p out/v4_base/run_$$i/mixed_$$ratio; \
-			sed "s/__RATIO__/$$ratio/g" sims/base-mixed.json > sims/p4app.json; \
-			P4APP_LOGDIR=./out/v4_base/run_$$i/mixed_$$ratio ./p4app/p4app run sims; \
-		done \
-	done
+# --- Run Simulation Targets ---
+run:
+	$(PYTHON) run.py -r $(RUNS)
 
-v4_ext:
-	@echo "Running v4_ext experiments for $(RUNS) runs..."
-	@for i in $$(seq 1 $(RUNS)); do \
-		echo "=== v4_ext Run $$i / $(RUNS) ==="; \
-		mkdir -p out/v4_ext/run_$$i/spoof; \
-		cp sims/ext-spoof.json sims/p4app.json; \
-		P4APP_LOGDIR=./out/v4_ext/run_$$i/spoof ./p4app/p4app run sims; \
-		mkdir -p out/v4_ext/run_$$i/legit; \
-		cp sims/ext-legit.json sims/p4app.json; \
-		P4APP_LOGDIR=./out/v4_ext/run_$$i/legit ./p4app/p4app run sims; \
-		for ratio in $(RATIOS); do \
-			mkdir -p out/v4_ext/run_$$i/mixed_$$ratio; \
-			sed "s/__RATIO__/$$ratio/g" sims/ext-mixed.json > sims/p4app.json; \
-			P4APP_LOGDIR=./out/v4_ext/run_$$i/mixed_$$ratio ./p4app/p4app run sims; \
-		done \
-	done
+run-exp:
+	$(PYTHON) run.py -e $(ALL) -r $(RUNS)
 
-v6_ext:
-	@echo "Running v6_ext experiments for $(RUNS) runs..."
-	@for i in $$(seq 1 $(RUNS)); do \
-		echo "=== v6_ext Run $$i / $(RUNS) ==="; \
-		mkdir -p out/v6_ext/run_$$i/spoof; \
-		cp sims/ext-v6-spoof.json sims/p4app.json; \
-		P4APP_LOGDIR=./out/v6_ext/run_$$i/spoof ./p4app/p4app run sims; \
-		mkdir -p out/v6_ext/run_$$i/legit; \
-		cp sims/ext-v6-legit.json sims/p4app.json; \
-		P4APP_LOGDIR=./out/v6_ext/run_$$i/legit ./p4app/p4app run sims; \
-		for ratio in $(RATIOS); do \
-			mkdir -p out/v6_ext/run_$$i/mixed_$$ratio; \
-			sed "s/__RATIO__/$$ratio/g" sims/ext-v6-mixed.json > sims/p4app.json; \
-			P4APP_LOGDIR=./out/v6_ext/run_$$i/mixed_$$ratio ./p4app/p4app run sims; \
-		done \
-	done
-
+# --- Plot-Only Targets ---
 plot:
-	$(PYTHON) plot_results.py
+	$(PYTHON) run.py --plot-only
+
+plot-base:
+$(PYTHON) run.py --plot-only -e $(EXP)
 
 clean:
-	rm -rf out p4drop_experiments_performance.png sims/p4app.json
+	rm -rf out sims/p4app.json

@@ -1,4 +1,8 @@
+#!/usr/bin/env python3
 import os
+import shutil
+import subprocess
+import argparse
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -6,18 +10,14 @@ from pathlib import Path
 import numpy as np
 import scipy.stats as st
 
-OUT_DIR = os.environ.get("OUT_DIR", "out")
-
 try:
     import matplotlib
-
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from scapy.all import IP, TCP, IPv6
+    from scapy.all import IP, TCP, IPv6, PcapReader
 except ImportError:
     print("Please install matplotlib, scapy, numpy, scipy")
     sys.exit(1)
-
 
 EXPERIMENTS = [
     ("base", "P4Drop"),
@@ -26,6 +26,8 @@ EXPERIMENTS = [
 ]
 SENT_PCAP = ("s1-eth2", "out")
 RECV_PCAP = ("s1-eth1", "in")
+
+MAX_BLOCK_SPEED_INDEX = 150
 
 
 def find_pcap(base_dir, iface_prefix, suffix):
@@ -48,8 +50,8 @@ def tcp_src_and_payload_len(packet, is_v6=False):
     return None, 0
 
 
-def iter_runs(exp_name):
-    exp_dir = Path(OUT_DIR) / exp_name
+def iter_runs(out_dir, exp_name):
+    exp_dir = Path(out_dir) / exp_name
     if not exp_dir.exists():
         return []
     return sorted(
@@ -58,8 +60,6 @@ def iter_runs(exp_name):
 
 
 def count_payload_packets(pcap_path, exp_name, legit_ip):
-    from scapy.all import PcapReader
-
     is_v6 = exp_name == "ext_v6"
     legit = 0
     attack = 0
@@ -80,8 +80,8 @@ def count_payload_packets(pcap_path, exp_name, legit_ip):
     return legit, attack
 
 
-def analyze_run(exp_name, run):
-    log_dir = Path(OUT_DIR) / exp_name / run
+def analyze_run(out_dir, exp_name, run):
+    log_dir = Path(out_dir) / exp_name / run
     sent_pcap = find_pcap(log_dir, *SENT_PCAP)
     recv_pcap = find_pcap(log_dir, *RECV_PCAP)
 
@@ -115,10 +115,10 @@ def metric_rates(counts):
     return ldr, alr
 
 
-def collect_metric(exp_name, metric_name):
+def collect_metric(out_dir, exp_name, metric_name):
     values = []
-    for run in iter_runs(exp_name):
-        counts = analyze_run(exp_name, run)
+    for run in iter_runs(out_dir, exp_name):
+        counts = analyze_run(out_dir, exp_name, run)
         ldr, alr = metric_rates(counts)
         value = ldr if metric_name == "ldr" else alr
         if not np.isnan(value):
@@ -134,13 +134,13 @@ def mean_and_sem(values):
     return float(np.mean(values)), float(st.sem(values))
 
 
-def available_experiments():
+def available_experiments(out_dir):
     return [
-        (name, label) for name, label in EXPERIMENTS if Path(OUT_DIR, name).exists()
+        (name, label) for name, label in EXPERIMENTS if Path(out_dir, name).exists()
     ]
 
 
-def save_validation_plot(experiments):
+def save_validation_plot(out_dir, experiments):
     labels = [label for _, label in experiments]
     x = np.arange(len(labels))
     width = 0.36
@@ -151,11 +151,11 @@ def save_validation_plot(experiments):
     spoof_errs = []
 
     for exp_name, _ in experiments:
-        mean, err = mean_and_sem(collect_metric(exp_name, "ldr"))
+        mean, err = mean_and_sem(collect_metric(out_dir, exp_name, "ldr"))
         legit_means.append(mean)
         legit_errs.append(err)
 
-        mean, err = mean_and_sem(collect_metric(exp_name, "alr"))
+        mean, err = mean_and_sem(collect_metric(out_dir, exp_name, "alr"))
         spoof_means.append(mean)
         spoof_errs.append(err)
 
@@ -176,71 +176,15 @@ def save_validation_plot(experiments):
     axes[1].set_ylim(0, 105)
     axes[1].grid(axis="y", alpha=0.25)
 
-    title_suffix = (
-        " (com backlog)" if "backlog" in OUT_DIR.lower() else " (sem backlog)"
-    )
+    title_suffix = " (com backlog)" if "backlog" in out_dir.lower() else " (sem backlog)"
     fig.suptitle(f"Desempenho no Cenário Misto{title_suffix}")
     fig.tight_layout()
-    fig.savefig(f"{OUT_DIR}/validation_correctness.png")
+    fig.savefig(f"{out_dir}/validation_correctness.png")
     plt.close(fig)
-
-
-def collect_mixed_series(exp_name, ratios, metric_name):
-    means = []
-    errs = []
-
-    for ratio in ratios:
-        values = collect_metric(exp_name, f"mixed_{ratio}", metric_name)
-        mean, err = mean_and_sem(values)
-        means.append(mean)
-        errs.append(err)
-
-        if not values:
-            print(f"Warning: missing data for {exp_name}/mixed_{ratio}")
-
-    return np.array(means), np.array(errs)
-
-
-def save_mixed_plot(experiments, ratios, metric_name, ylabel, title, output_file):
-    x = np.array([float(r) * 100.0 for r in ratios])
-
-    plt.figure(figsize=(8, 4.8))
-    for exp_name, label in experiments:
-        means, errs = collect_mixed_series(exp_name, ratios, metric_name)
-        valid = ~np.isnan(means)
-        if not np.any(valid):
-            continue
-        plt.errorbar(
-            x[valid],
-            means[valid],
-            yerr=errs[valid],
-            marker="o",
-            capsize=4,
-            label=label,
-        )
-
-    plt.xlabel("Razao de Fluxos de Ataque (%)")
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.ylim(-5, 105)
-    plt.grid(True, alpha=0.3)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(output_file)
-    plt.close()
-
-
-# ---------------------------------------------------------------------------
-# Flow block speed comparison
-# ---------------------------------------------------------------------------
-
-MAX_BLOCK_SPEED_INDEX = 150
 
 
 def get_flow_delivery_profiles(sent_pcap, recv_pcap, legit_ip, is_v6=False):
     """Return lists of bools indicating if k-th packet of each flow was delivered."""
-    from scapy.all import PcapReader
-
     sent_flows = defaultdict(list)
     try:
         with PcapReader(sent_pcap) as reader:
@@ -306,7 +250,7 @@ def get_flow_delivery_profiles(sent_pcap, recv_pcap, legit_ip, is_v6=False):
     return profiles
 
 
-def save_flow_block_speed_plot(experiments):
+def save_flow_block_speed_plot(out_dir, experiments):
     """Average flow delivery profiles over runs, and plot flow block speed."""
     fig, ax = plt.subplots(figsize=(7.5, 4.8))
 
@@ -314,8 +258,8 @@ def save_flow_block_speed_plot(experiments):
 
     for exp_name, label in experiments:
         all_profiles = []
-        for run in iter_runs(exp_name):
-            log_dir = Path(OUT_DIR) / exp_name / run
+        for run in iter_runs(out_dir, exp_name):
+            log_dir = Path(out_dir) / exp_name / run
             sent_pcap = find_pcap(log_dir, *SENT_PCAP)
             recv_pcap = find_pcap(log_dir, *RECV_PCAP)
             if not sent_pcap or not recv_pcap:
@@ -346,9 +290,7 @@ def save_flow_block_speed_plot(experiments):
             alpha=0.15,
         )
 
-    title_suffix = (
-        " (com backlog)" if "backlog" in OUT_DIR.lower() else " (sem backlog)"
-    )
+    title_suffix = " (com backlog)" if "backlog" in out_dir.lower() else " (sem backlog)"
     ax.set_title(f"Taxa de entrega de pacotes nos fluxos de ataque{title_suffix}")
     ax.set_xlabel("Índice do pacote no fluxo (seq. cronológica)")
     ax.set_ylabel("Probabilidade de entrega (%)")
@@ -356,20 +298,116 @@ def save_flow_block_speed_plot(experiments):
     ax.grid(True, alpha=0.3)
     ax.legend()
     fig.tight_layout()
-    fig.savefig(f"{OUT_DIR}/flow_block_speed.png")
+    fig.savefig(f"{out_dir}/flow_block_speed.png")
     plt.close(fig)
-    print(f"Saved {OUT_DIR}/flow_block_speed.png")
+    print(f"Saved {out_dir}/flow_block_speed.png")
+
+
+def generate_plots(out_dir, experiment_filter="all"):
+    experiments = available_experiments(out_dir)
+    if experiment_filter != "all":
+        experiments = [e for e in experiments if e[0] == experiment_filter]
+
+    if not experiments:
+        print(f"No experiment outputs found in {out_dir}/ for filter '{experiment_filter}'.")
+        return
+
+    save_validation_plot(out_dir, experiments)
+    save_flow_block_speed_plot(out_dir, experiments)
+    print(f"Plots saved in {out_dir}/ directory.")
+
+
+def run_sim(config_path, log_dir, env_extra=None):
+    shutil.copy(config_path, "sims/p4app.json")
+    os.makedirs(log_dir, exist_ok=True)
+
+    env = os.environ.copy()
+    env["P4APP_LOGDIR"] = log_dir
+    if env_extra:
+        env.update(env_extra)
+
+    print(f"Running: {config_path} -> {log_dir} (env: {env_extra})")
+    res = subprocess.run(
+        ["./p4app/p4app", "run", "sims"],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if res.returncode != 0:
+        print(f"ERROR: run failed for {config_path} -> {log_dir}")
+        print(f"STDOUT:\n{res.stdout.decode()[-1000:]}")
+        print(f"STDERR:\n{res.stderr.decode()[-1000:]}")
+    return res.returncode == 0
 
 
 def main():
-    experiments = available_experiments()
-    if not experiments:
-        print(f"No experiment outputs found in {OUT_DIR}/.")
-        return
+    parser = argparse.ArgumentParser(description="Run simulation experiments and generate plots.")
+    parser.add_argument(
+        "-e", "--experiment",
+        choices=["all", "base", "ext", "ext_v6"],
+        default="all",
+        help="Select a specific experiment to run (default: all)"
+    )
+    parser.add_argument(
+        "-p", "--plot-only",
+        action="store_true",
+        help="Skip simulations and only generate/regenerate plots"
+    )
+    parser.add_argument(
+        "-r", "--runs",
+        type=int,
+        default=5,
+        help="Number of simulation runs (default: 5)"
+    )
+    args = parser.parse_args()
 
-    save_validation_plot(experiments)
-    save_flow_block_speed_plot(experiments)
-    print(f"Plots saved in {OUT_DIR}/ directory.")
+    # Filter experiments
+    if args.experiment == "all":
+        experiments_to_run = EXPERIMENTS
+    else:
+        experiments_to_run = [e for e in EXPERIMENTS if e[0] == args.experiment]
+
+    if not args.plot_only:
+        # Ensure output directories are clean
+        os.makedirs("out/no_backlog", exist_ok=True)
+        os.makedirs("out/backlog", exist_ok=True)
+
+        # Total progress tracker
+        total_steps = len(experiments_to_run) * args.runs * 2  # no_backlog, backlog
+        current_step = 0
+
+        print(f"Starting experimental suite with {args.runs} runs of 90s simulations.")
+        print(f"Total steps to execute: {total_steps}")
+
+        for exp_name, config_path in experiments_to_run:
+            for r in range(1, args.runs + 1):
+                # 1. Run attack with no_backlog model
+                current_step += 1
+                print(f"\n[Step {current_step}/{total_steps}] Mixed 0.1 (no_backlog) for {exp_name} run {r}...")
+                run_sim(
+                    config_path,
+                    f"./out/no_backlog/{exp_name}/run_{r}",
+                    {"ATTACK_MODEL": "no_backlog"},
+                )
+
+                # 2. Run attack with backlog model
+                current_step += 1
+                print(f"\n[Step {current_step}/{total_steps}] Mixed 0.1 (backlog) for {exp_name} run {r}...")
+                run_sim(
+                    config_path,
+                    f"./out/backlog/{exp_name}/run_{r}",
+                    {"ATTACK_MODEL": "backlog"},
+                )
+
+        print("\n================ All Simulations Finished ================")
+
+    print("Generating no_backlog plots...")
+    generate_plots("out/no_backlog", args.experiment)
+
+    print("Generating backlog plots...")
+    generate_plots("out/backlog", args.experiment)
+
+    print("Plots generated successfully under out/no_backlog/ and out/backlog/.")
 
 
 if __name__ == "__main__":
