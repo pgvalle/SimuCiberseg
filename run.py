@@ -20,11 +20,16 @@ except ImportError:
     print("Please install matplotlib, scapy, numpy, scipy")
     sys.exit(1)
 
-EXPERIMENTS = [
-    ("base", "P4Drop"),
-    ("ext", "P4DropExt IPv4"),
-    ("ext_v6", "P4DropExt IPv6"),
+EXPERIMENT_CONFIGS = [
+    ("base", "sims/base.json"),
+    ("ext", "sims/ext.json"),
+    ("ext_v6", "sims/ext-v6.json"),
 ]
+EXPERIMENT_LABELS = {
+    "base": "P4Drop",
+    "ext": "P4DropExt IPv4",
+    "ext_v6": "P4DropExt IPv6",
+}
 SENT_PCAP = ("s1-eth2", "out")
 RECV_PCAP = ("s1-eth1", "in")
 
@@ -137,7 +142,9 @@ def mean_and_sem(values):
 
 def available_experiments(out_dir):
     return [
-        (name, label) for name, label in EXPERIMENTS if Path(out_dir, name).exists()
+        (name, EXPERIMENT_LABELS[name])
+        for name, _ in EXPERIMENT_CONFIGS
+        if Path(out_dir, name).exists()
     ]
 
 
@@ -375,9 +382,9 @@ def main():
 
     # Filter experiments
     if args.experiment == "all":
-        experiments_to_run = EXPERIMENTS
+        experiments_to_run = EXPERIMENT_CONFIGS
     else:
-        experiments_to_run = [e for e in EXPERIMENTS if e[0] == args.experiment]
+        experiments_to_run = [e for e in EXPERIMENT_CONFIGS if e[0] == args.experiment]
 
     if not args.plot_only:
         # Ensure output directories are clean
@@ -388,7 +395,7 @@ def main():
         total_steps = len(experiments_to_run) * args.runs * 2  # no_backlog, backlog
         current_step = 0
 
-        print(f"Starting experimental suite with {args.runs} runs of 90s simulations.")
+        print(f"Starting experimental suite with {args.runs} runs of simulations.")
         print(f"Total steps to execute: {total_steps}")
 
         for exp_name, config_path in experiments_to_run:
