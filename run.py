@@ -33,7 +33,7 @@ EXPERIMENT_LABELS = {
 SENT_PCAP = ("s1-eth2", "out")
 RECV_PCAP = ("s1-eth1", "in")
 
-MAX_BLOCK_SPEED_INDEX = 150
+MAX_BLOCK_SPEED_INDEX = 200
 
 
 def find_pcap(base_dir, iface_prefix, suffix):
@@ -173,21 +173,19 @@ def save_validation_plot(out_dir, experiments):
     axes[0].set_title("Entrega de Tráfego Legítimo")
     axes[0].set_ylabel("Pacotes recebidos / transmitidos (%)")
     axes[0].set_xticks(x)
-    axes[0].set_xticklabels(labels, rotation=15, ha="right")
+    axes[0].set_xticklabels(labels, rotation=0, ha="center")
     axes[0].set_ylim(0, 105)
     axes[0].grid(axis="y", alpha=0.25)
 
     axes[1].bar(x, spoof_means, width, yerr=spoof_errs, color="#c62828", capsize=4)
-    axes[1].set_title("Vazamento de Tráfego Malicioso")
+    axes[1].set_title("Vazamento de Tráfego Falsificado")
     axes[1].set_xticks(x)
-    axes[1].set_xticklabels(labels, rotation=15, ha="right")
+    axes[1].set_xticklabels(labels, rotation=0, ha="center")
     axes[1].set_ylim(0, 105)
     axes[1].grid(axis="y", alpha=0.25)
 
-    title_suffix = (
-        " (com backlog)" if "backlog" in out_dir.lower() else " (sem backlog)"
-    )
-    fig.suptitle(f"Desempenho no Cenário Misto{title_suffix}")
+    title_suffix = "sem backlog" if "no" in out_dir.lower() else "com backlog"
+    fig.suptitle(f"Razões totais de entrega/vazamento ({title_suffix})")
     fig.tight_layout()
     fig.savefig(f"{out_dir}/validation_correctness.png")
     plt.close(fig)
@@ -300,10 +298,8 @@ def save_flow_block_speed_plot(out_dir, experiments):
             alpha=0.15,
         )
 
-    title_suffix = (
-        " (com backlog)" if "backlog" in out_dir.lower() else " (sem backlog)"
-    )
-    ax.set_title(f"Taxa de entrega de pacotes nos fluxos de ataque{title_suffix}")
+    title_suffix = " (sem backlog)" if "no" in out_dir.lower() else " (com backlog)"
+    ax.set_title(f"Taxa de vazamento de pacotes dos fluxos falsos{title_suffix}")
     ax.set_xlabel("Índice do pacote no fluxo (seq. cronológica)")
     ax.set_ylabel("Probabilidade de entrega (%)")
     ax.set_ylim(-5, 105)

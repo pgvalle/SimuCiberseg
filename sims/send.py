@@ -1,4 +1,5 @@
 from __future__ import division
+
 import socket
 import sys
 import threading
@@ -66,7 +67,7 @@ def attack_flow(props):
 
 
 for i in range(NUM_FLOWS):
-    is_attack = (i + 1) / NUM_FLOWS < attack_ratio
+    is_attack = (i + 1) / NUM_FLOWS <= attack_ratio
     if is_attack:
         props = {
             "src_ip": "10.1.0.%d" % (i + 1),

@@ -1,4 +1,5 @@
 from __future__ import division
+
 import os
 import socket
 import sys
@@ -78,7 +79,7 @@ def attack_flow(props):
 
 
 for i in range(NUM_FLOWS):
-    is_attack = (i + 1) / NUM_FLOWS < attack_ratio
+    is_attack = (i + 1) / NUM_FLOWS <= attack_ratio
     if is_attack:
         src_ip = "2001:db9:2::%x" % (0x1000 + i)
         props = {"src_ip": src_ip, "sport": 10000 + i, "seq": 0}
