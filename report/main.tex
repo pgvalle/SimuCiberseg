@@ -12,6 +12,41 @@
 
 \usepackage{hyperref} % references can be clicked
 
+\usepackage{listings}
+\usepackage{xcolor}
+
+% Custom P4 language definition for listings
+\lstdefinelanguage{P4}{
+  keywords={action, apply, control, default_action, drop, exit, header, headers, parser, state, struct, table, transition, select, bit, int, void, error, const, if, else, switch, return},
+  sensitive=true,
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  morestring=[b]",
+  morestring=[b]'
+}
+
+\lstset{
+  language=P4,
+  basicstyle=\ttfamily\scriptsize, % Monospace, reduced font size
+  numbers=left,                     % Show line numbers on the left
+  numberstyle=\tiny\color{gray},    % Style for line numbers
+  stepnumber=1,
+  numbersep=8pt,
+  backgroundcolor=\color{white},
+  showspaces=false,
+  showstringspaces=false,
+  showtabs=false,
+  frame=single,                     % Border frame
+  rulecolor=\color{black!30},
+  tabsize=4,
+  captionpos=b,
+  breaklines=true,                  % Wrap long lines
+  breakatwhitespace=false,
+  keywordstyle=\color{blue}\bfseries,
+  commentstyle=\color{gray}\itshape,
+  stringstyle=\color{red},
+}
+
 
 \hypersetup{
     colorlinks=true, % Colors the text instead of drawing boxes
@@ -90,7 +125,117 @@ que adapta o P4Drop para operar nativamente em redes IPv6 e IPv4.
 %---como o processamento dos cabeçalhos de extensão e o balanceamento no consumo de memória para endereços de 128 bits---,
 %demonstrando ser possível manter uma mitigação eficaz sem custo extra de .
 
-\subsection{P4Drop}
+
+\section{P4}
+
+Supondo suporte da linguagem P4 ao dispositivo do fabricante,
+a arquitetura da linguagem é dividida em pipelines de entrada (\textit{ingress}) e saída (\textit{egress}),
+A pipeline de entrada começa com o \textbf{parser},
+que é uma máquina de estados para realizar a extração sequencial dos campos de cabeçalho esperados dos pacotes.
+
+\begin{lstlisting}[language=P4, caption={Definição do parser no P4Drop.}, label={lst:parser}]
+parser MyParser(packet_in packet, out headers hdr, inout metadata meta, inout standard_metadata_t std_meta) {
+    state start {
+        transition parse_ethernet;
+    }
+
+    state parse_ethernet {
+        packet.extract(hdr.ethernet);
+        transition select(hdr.ethernet.etherType) {
+            TYPE_ARP  : parse_arp;
+            TYPE_IPV4 : parse_ipv4;
+            default: accept;
+        }
+    }
+
+    state parse_arp {
+        packet.extract(hdr.arp);
+        transition accept;
+    }
+
+    state parse_ipv4 {
+        packet.extract(hdr.ipv4);
+        transition select(hdr.ipv4.protocol) {
+            6 : parse_tcp; // TCP = 6
+            default: accept;
+        }
+    }
+
+    state parse_tcp {
+        packet.extract(hdr.tcp);
+        transition accept;
+    }
+}
+\end{lstlisting}
+
+Na Listagem~\ref{lst:parser}, podemos ver o código P4 utilizado no parser do P4Drop.
+Esse parser define um total de 5 estados,
+sendo o estado \texttt{start} (linhas~5--7) aquele que inicia o processamento do pacote,
+transicionando diretamente para o estado \texttt{parse\_ethernet}.
+No estado \texttt{parse\_ethernet} (linhas~9--16),
+o cabeçalho Ethernet é extraído e seu campo \texttt{etherType} é avaliado em um bloco \texttt{select}.
+Caso o campo indique uma requisição ARP, a máquina transiciona para o estado \texttt{parse\_arp} (linhas~18--21),
+onde extrai o cabeçalho e aceita o pacote;
+caso o valor indique que há um pacote IPv4 encapsulado, a transição ocorre para o estado \texttt{parse\_ipv4}.
+Ao entrar no estado \texttt{parse\_ipv4} (linhas~23--29), o cabeçalho IPv4 é extraído e o seu campo protocolo é verificado.
+Por fim, se o protocolo encapsulado for o TCP, identificado pelo valor 6,
+o cabeçalho TCP é extraído no estado \texttt{parse\_tcp} (linhas~31--34) antes da aceitação e término da análise do pacote.
+
+Após a extração pelo parser, os cabeçalhos são encaminhados para a fase de \textbf{ingress processing}.
+Nessa fase, o programador pode definir tabelas de casamento de chaves (\textit{tables}),
+ações customizadas (\textit{actions}) e registradores persistentes (\textit{registers}) para alterar cabeçalhos ou decidir o descarte de pacotes.
+A Listagem~\ref{lst:ingress} apresenta um exemplo simplificado de uso.
+
+\begin{lstlisting}[language=P4, caption={Exemplo simplificado de Ingress Processing em P4.}, label={lst:ingress}]
+control MyIngress(inout headers hdr, inout metadata meta, inout standard_metadata_t std_meta) {
+    register<bit<32>>(1024) pkt_counter;
+
+    action drop_packet() {
+        mark_to_drop(std_meta);
+    }
+
+    action ipv4_forward(bit<9> port) {
+        std_meta.egress_spec = port;
+    }
+
+    table tcp_filter {
+        key = {
+            hdr.tcp.dstPort: exact;
+        }
+        actions = {
+            ipv4_forward;
+            drop_packet;
+        }
+        default_action = ipv4_forward(1);
+    }
+
+    apply {
+        if (hdr.ipv4.isValid() && hdr.tcp.isValid()) {
+            bit<32> count;
+            pkt_counter.read(count, (bit<32>)hdr.ipv4.srcAddr & 1023);
+            pkt_counter.write((bit<32>)hdr.ipv4.srcAddr & 1023, count + 1);
+            tcp_filter.apply();
+        }
+    }
+}
+\end{lstlisting}
+
+Inicialmente, define-se o registrador persistente \texttt{pkt\_counter} (linha~2)
+para armazenar a contagem de pacotes de cada fluxo.
+Em seguida, implementamos as ações \texttt{drop\_packet} (linhas~4--6),
+que marca o pacote para descarte usando os metadados do switch,
+e \texttt{ipv4\_forward} (linhas~8--10), que define a porta física de saída do pacote.
+A tabela de decisão \texttt{tcp\_filter} (linhas~12--21) mapeia a porta TCP de destino por meio de um casamento exato (linha~14) para determinar se executa a ação de encaminhamento ou de descarte. A execução do pipeline inicia-se de fato no bloco \texttt{apply} (linhas~23--30). Primeiro, avaliamos se os cabeçalhos IPv4 e TCP são válidos (linha~24). Caso ambos estejam presentes, lemos o valor atual do contador associado ao endereço IP de origem (linha~26) e escrevemos o valor incrementado de volta ao registrador (linha~27). Por fim, o pipeline aplica a tabela \texttt{tcp\_filter} (linha~28), decidindo o destino do pacote com base nas regras estabelecidas.
+
+\subsection{Egress e Etapas Finais do Pipeline}
+
+Após o processamento de \textit{ingress}, a arquitetura direciona o pacote ao gerenciador de tráfego (\textit{Traffic Manager}), responsável pelo enfileiramento físico. O pacote segue então para o pipeline de saída (\textbf{egress processing}), modelado pelo controle \texttt{MyEgress}. O processamento de \textit{egress} permite reescrever campos específicos ou aplicar políticas de enfileiramento relacionadas à interface de saída física (como portas de túneis ou espelhamento). Por fim, o deparser (\texttt{MyDeparser}) reconstrói o fluxo binário de pacotes sequenciais a partir da estrutura modificada dos cabeçalhos, recalculando os respectivos checksums (\texttt{MyComputeChecksum}) antes da transmissão física final.
+
+
+
+
+
+\section{P4Drop}
 
 
 
