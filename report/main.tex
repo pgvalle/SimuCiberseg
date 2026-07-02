@@ -60,48 +60,48 @@ O protocolo TCP, por não ter sido projetado com um foco primário em segurança
 Técnicas de ataque exploram o processo de estabelecimento de conexão,
 como é o caso do TCP SYN Flood, para exaurir os recursos dos servidores.
 Esse tipo de ataque frequentemente se apoia no IP Spoofing (falsificação de endereço IP),
-uma técnica onde o atacante forja o endereço IP de origem dos pacotes para personificar fontes confiáveis, dificultando a mitigação e o rastreamento.
-Tais ataques podem facilitar ameaças subsequentes severas, incluindo sequestro de sessão,
+uma técnica onde o atacante forja o endereço IP de origem dos pacotes para personificar fontes confiáveis.
+Tais ataques podem servir como base de outros, incluindo sequestro de sessão,
 ataques de homem-no-meio (man-in-the-middle) e ataques de negação de serviço (DoS).
 
 Ao longo dos anos, diversas tecnologias surgiram para fornecer uma infraestrutura de segurança mais robusta contra essas ameaças.
-Dentre elas, o advento dos comutadores programáveis de pacotes (ASICs) e do plano de dados programável representa uma mudança de paradigma.
-Esses dispositivos conseguem processar bilhões de pacotes por segundo (throughput na ordem de Tbps) e realizar inspeção profunda de pacotes em tempo real.
+Dentre elas, o advento dos comutadores programáveis de pacotes representa uma mudança de paradigma.
+Esses dispositivos conseguem processar bilhões de pacotes por segundo (throughput na ordem de Tbps) e realizar inspeção de pacotes em tempo real.
 Através de linguagens de domínio específico, como P4 (Programming Protocol-independent Packet Processors),
 tornou-se possível customizar o processamento de cabeçalhos, a manipulação de metadados e a lógica de encaminhamento diretamente no plano de dados.
-Isso permite implementar políticas de segurança ágeis que identificam e bloqueiam tráfego malicioso antes de sua entrada efetiva na rede,
-mitigando gargalos de comunicação e latência que são comuns em arquiteturas dependentes do plano de controle.
+Isso permite implementar políticas de segurança ágeis que identificam e respondem ao tráfego malicioso antes de sua entrada efetiva na rede,
+evitando gargalos de comunicação e latência que são comuns em soluções dependentes do plano de controle.
 
 Aproveitando o potencial dessa arquitetura, Xiao et al. propuseram o P4Drop,
-uma função heurística leve implementada no plano de dados programável para filtrar ataques de TCP spoofing de forma autônoma.
-O P4Drop estabelece um mecanismo de confiança baseado na queda ativa do primeiro pacote válido de um fluxo e na observação de retransmissões subsequentes,
+uma função heurística implementada no plano de dados programável para filtrar ataques de TCP spoofing de forma autônoma.
+O P4Drop estabelece um mecanismo de confiança baseado no descarte ativo de pacotes dos fluxos e na espera de suas respectivas retransmissões,
 permitindo distinguir fluxos em malha fechada de tráfego falsificado.
-Os resultados experimentais da solução demonstraram uma alta eficácia,
-filtrando aproximadamente 98,6\% dos pacotes de ataque sob cenários de alta densidade.
+Os resultados experimentais da solução demonstraram bloqueio de 98,6\% dos pacotes de ataque sob cenários de alta densidade.
 
-Apesar da alta eficácia e do processamento em line-rate, a heurística do P4Drop apresenta limitações arquiteturais,
+Apesar dos bons resultados, a heurística do P4Drop apresenta limitações arquiteturais,
 uma vez que foi modelado para funcionar exclusivamente com IPv4.
 Com a adoção maciça e irreversível do IPv6, as redes modernas operam majoritariamente em pilha dupla ou puramente IPv6.
-O protocolo IPv6 não apenas introduz endereços de 128 bits,
-mas também altera fundamentalmente a estrutura de fragmentação e leitura de cabeçalhos por meio dos Extension Headers.
-Modelos de defesa que dependem de offsets fixos, como o cálculo baseado no IPv4, perdem sua aplicabilidade nesse novo cenário.
-
-Neste contexto, o presente trabalho estende e adapta a heurística do P4Drop para operar nativamente em redes IPv6 e IPv4.
-A solução considera e discute os desafios intrínsecos do novo protocolo
----como o processamento dos cabeçalhos de extensão e o balanceamento no consumo de memória para endereços de 128 bits---,
-demonstrando ser possível manter uma mitigação eficaz de anomalias TCP sem violar as restrições de hardware do plano de dados.
+Neste contexto, o presente trabalho apresenta o P4DropExt,
+que adapta o P4Drop para operar nativamente em redes IPv6 e IPv4.
 (Falar algo sobre os resultados na versão final)
 
 (falar como está a organização do artigo; sujeito a mudanças)
+%A solução aborda os desafios intrínsecos do novo protocolo
+%---como o processamento dos cabeçalhos de extensão e o balanceamento no consumo de memória para endereços de 128 bits---,
+%demonstrando ser possível manter uma mitigação eficaz sem custo extra de .
 
-\section{P4Drop}
+\subsection{P4Drop}
 
-Esta seção apresenta o P4drop em detalhes.
+
 
 \section{P4DropExt}
 
-Esta seção apresenta o P4DropExt em detalhes.
-Características, diferenças com o P4Drop original, e algumas discussões (limitações; principalmente em relação a fragmentação no ipv4 e ipv6).
+IPv4 e IPv6 possuem várias diferenças.
+Dentre elas, uma notável é o tamanho dos endereços.
+O IPv4 utiliza endereços de 4 bytes, enquanto o IPv6 usa 16 bytes.
+Isso impactaria significativamente o tamanho do registro associado ao fluxo, pensando em uma adaptação simples.
+Em particular, o tamanho do registro aumenta de 25 bytes para 49 bytes.
+
 
 \section{Experimentos}
 
