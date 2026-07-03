@@ -14,6 +14,8 @@
 
 \usepackage{listings}
 \usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,automata,positioning,shapes.geometric}
 
 % Custom P4 language definition for listings
 \lstdefinelanguage{P4}{
@@ -127,14 +129,29 @@ que adapta o P4Drop para operar nativamente em redes IPv6 e IPv4.
 
 
 \section{P4}
+\label{sec:p4}
 
-Supondo suporte da linguagem P4 ao dispositivo do fabricante,
-a arquitetura da linguagem é dividida em pipelines de entrada (\textit{ingress}) e saída (\textit{egress}),
-A pipeline de entrada começa com o \textbf{parser},
-que é uma máquina de estados para realizar a extração sequencial dos campos de cabeçalho esperados dos pacotes.
+A arquitetura de processamento da linguagem P4 é estruturada
+em etapas sequenciais que compõem o pipeline de um comutador programável de pacotes.
+Essas etapas compreendem: (1) parser de ingresso (\textit{IngressParser});
+(2) processamento de ingresso (\textit{Ingress}), (3) deparser de ingresso (\textit{IngressDeparser}),
+(4) gerenciador de tráfego (\textit{Traffic Manager}), (5) parser de egresso (\textit{EgressParser}),
+(6) processamento de egresso (\textit{Egress}) e (7) deparser de egresso (\textit{EgressDeparser})~\cite{p4_psa_spec}.
+O foco principal desta seção é apresentar o \textit{IngressParser} e o \textit{Ingress} para melhor compreensão do P4Drop,
+apresentado na Seção~\ref{sec:p4drop}.
+
+\subsection{IngressParser}
+\label{sec:p4:iparser}
+
+O \textit{IngressParser} é o componente inicial encarregado de extrair os cabeçalhos dos pacotes de acordo com a pilha de protocolos da rede.
+Durante essa extração, os bytes são mapeados para as estruturas de cabeçalhos definidas pelo programador,
+que serão manipuladas nas etapas seguintes.
+Se um cabeçalho esperado não for encontrado ou apresentar formatação incorreta,
+o parser sinaliza a ocorrência de erro nos metadados padrão do switch.
 
 \begin{lstlisting}[language=P4, caption={Definição do parser no P4Drop.}, label={lst:parser}]
-parser MyParser(packet_in packet, out headers hdr, inout metadata meta, inout standard_metadata_t std_meta) {
+parser MyParser(packet_in packet, out headers hdr, inout metadata meta,
+                inout standard_metadata_t std_meta) {
     state start {
         transition parse_ethernet;
     }
@@ -144,7 +161,7 @@ parser MyParser(packet_in packet, out headers hdr, inout metadata meta, inout st
         transition select(hdr.ethernet.etherType) {
             TYPE_ARP  : parse_arp;
             TYPE_IPV4 : parse_ipv4;
-            default: accept;
+            default   : accept;
         }
     }
 
@@ -156,7 +173,7 @@ parser MyParser(packet_in packet, out headers hdr, inout metadata meta, inout st
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
-            6 : parse_tcp; // TCP = 6
+            6      : parse_tcp; // TCP = 6
             default: accept;
         }
     }
@@ -168,23 +185,29 @@ parser MyParser(packet_in packet, out headers hdr, inout metadata meta, inout st
 }
 \end{lstlisting}
 
-Na Listagem~\ref{lst:parser}, podemos ver o código P4 utilizado no parser do P4Drop.
-Esse parser define um total de 5 estados,
-sendo o estado \texttt{start} (linhas~5--7) aquele que inicia o processamento do pacote,
-transicionando diretamente para o estado \texttt{parse\_ethernet}.
-No estado \texttt{parse\_ethernet} (linhas~9--16),
-o cabeçalho Ethernet é extraído e seu campo \texttt{etherType} é avaliado em um bloco \texttt{select}.
-Caso o campo indique uma requisição ARP, a máquina transiciona para o estado \texttt{parse\_arp} (linhas~18--21),
-onde extrai o cabeçalho e aceita o pacote;
-caso o valor indique que há um pacote IPv4 encapsulado, a transição ocorre para o estado \texttt{parse\_ipv4}.
-Ao entrar no estado \texttt{parse\_ipv4} (linhas~23--29), o cabeçalho IPv4 é extraído e o seu campo protocolo é verificado.
-Por fim, se o protocolo encapsulado for o TCP, identificado pelo valor 6,
-o cabeçalho TCP é extraído no estado \texttt{parse\_tcp} (linhas~31--34) antes da aceitação e término da análise do pacote.
+A Listagem~\ref{lst:parser} mostra o \textit{IngressParser} do P4Drop.
+Note que trata-se de uma máquina de estados finitos.
+O estado inicial \texttt{start} (linhas~3--5) inicia o processamento do pacote
+e transiciona imediatamente para o estado \texttt{parse\_ethernet}.
+Em \texttt{parse\_ethernet} (linhas~7--14), o parser extrai o cabeçalho Ethernet (linha~8)
+e avalia o campo \texttt{etherType} por meio de um bloco \texttt{select} (linha~9).
+Se o campo indicar uma requisição ARP, o fluxo vai para \texttt{parse\_arp} (linhas~16--19)
+para extrair o respectivo cabeçalho (linha~17) e aceitar o pacote.
+Caso o valor aponte para um pacote IPv4 encapsulado, o parser passa para \texttt{parse\_ipv4}.
+Ao ingressar em \texttt{parse\_ipv4} (linhas~21--27), a máquina de estados extrai
+o cabeçalho IPv4 (linha~22) e avalia o campo do protocolo (linha~23).
+Por fim, se o protocolo encapsulado corresponder ao TCP (indicado pelo valor 6 na linha~24),
+o parser realiza a extração do cabeçalho TCP no estado \texttt{parse\_tcp} (linhas~29--32)
+antes de aceitar e encerrar o processamento do pacote.
 
-Após a extração pelo parser, os cabeçalhos são encaminhados para a fase de \textbf{ingress processing}.
-Nessa fase, o programador pode definir tabelas de casamento de chaves (\textit{tables}),
-ações customizadas (\textit{actions}) e registradores persistentes (\textit{registers}) para alterar cabeçalhos ou decidir o descarte de pacotes.
-A Listagem~\ref{lst:ingress} apresenta um exemplo simplificado de uso.
+\subsection{Ingress}
+\label{sec:p4:ingress}
+
+Após a extração dos cabeçalhos no \textit{IngressParser}, o pacote é direcionado para a fase de \textit{Ingress}.
+Nessa etapa, o desenvolvedor pode definir tabelas de casamento de chaves (\textit{tables}),
+ações customizadas (\textit{actions}) e registradores em hardware (\textit{registers})
+para tomar decisões de roteamento, modificar de cabeçalhos ou descartar pacotes.
+A Listagem~\ref{lst:ingress} apresenta uma implementação simples como exemplo.
 
 \begin{lstlisting}[language=P4, caption={Exemplo simplificado de Ingress Processing em P4.}, label={lst:ingress}]
 control MyIngress(inout headers hdr, inout metadata meta, inout standard_metadata_t std_meta) {
@@ -198,46 +221,235 @@ control MyIngress(inout headers hdr, inout metadata meta, inout standard_metadat
         std_meta.egress_spec = port;
     }
 
-    table tcp_filter {
+    table ipv4_route {
         key = {
-            hdr.tcp.dstPort: exact;
+            hdr.ipv4.dstAddr: exact;
         }
         actions = {
             ipv4_forward;
             drop_packet;
         }
-        default_action = ipv4_forward(1);
+        default_action = drop_packet();
     }
 
     apply {
-        if (hdr.ipv4.isValid() && hdr.tcp.isValid()) {
+        if (hdr.ipv4.isValid()) {
             bit<32> count;
             pkt_counter.read(count, (bit<32>)hdr.ipv4.srcAddr & 1023);
             pkt_counter.write((bit<32>)hdr.ipv4.srcAddr & 1023, count + 1);
-            tcp_filter.apply();
+            ipv4_route.apply();
         }
     }
 }
 \end{lstlisting}
 
-Inicialmente, define-se o registrador persistente \texttt{pkt\_counter} (linha~2)
-para armazenar a contagem de pacotes de cada fluxo.
-Em seguida, implementamos as ações \texttt{drop\_packet} (linhas~4--6),
-que marca o pacote para descarte usando os metadados do switch,
-e \texttt{ipv4\_forward} (linhas~8--10), que define a porta física de saída do pacote.
-A tabela de decisão \texttt{tcp\_filter} (linhas~12--21) mapeia a porta TCP de destino por meio de um casamento exato (linha~14) para determinar se executa a ação de encaminhamento ou de descarte. A execução do pipeline inicia-se de fato no bloco \texttt{apply} (linhas~23--30). Primeiro, avaliamos se os cabeçalhos IPv4 e TCP são válidos (linha~24). Caso ambos estejam presentes, lemos o valor atual do contador associado ao endereço IP de origem (linha~26) e escrevemos o valor incrementado de volta ao registrador (linha~27). Por fim, o pipeline aplica a tabela \texttt{tcp\_filter} (linha~28), decidindo o destino do pacote com base nas regras estabelecidas.
+Inicialmente, o código declara o registrador persistente \texttt{pkt\_counter} (linha~2),
+que conta os pacotes IP recebidos.
+Em seguida, o bloco define as ações \texttt{drop\_packet} (linhas~4--6) para marcar
+o pacote para descarte nos metadados padrão do switch,
+e \texttt{ipv4\_forward} (linhas~8--10) para definir a porta de saída física.
+A tabela de casamento \texttt{ipv4\_route} (linhas~12--21) busca o endereço IP
+de destino de forma exata (linha~14) para determinar a ação apropriada.
+A lógica de execução do datapath inicia-se no bloco \texttt{apply} (linhas~23--30).
+Primeiro, o pipeline verifica se o cabeçalho IPv4 é válido (linha~24).
+Caso seja, o código lê o valor atual do contador de pacotes (linha~26)
+e escreve o valor incrementado de volta (linha~27).
+Por fim, o bloco aplica a tabela \texttt{ipv4\_route} (linha~28)
+para decidir se o pacote segue para a porta de saída mapeada ou se será descartado.
 
-\subsection{Egress e Etapas Finais do Pipeline}
+\subsection{Outras etapas}
 
-Após o processamento de \textit{ingress}, a arquitetura direciona o pacote ao gerenciador de tráfego (\textit{Traffic Manager}), responsável pelo enfileiramento físico. O pacote segue então para o pipeline de saída (\textbf{egress processing}), modelado pelo controle \texttt{MyEgress}. O processamento de \textit{egress} permite reescrever campos específicos ou aplicar políticas de enfileiramento relacionadas à interface de saída física (como portas de túneis ou espelhamento). Por fim, o deparser (\texttt{MyDeparser}) reconstrói o fluxo binário de pacotes sequenciais a partir da estrutura modificada dos cabeçalhos, recalculando os respectivos checksums (\texttt{MyComputeChecksum}) antes da transmissão física final.
+Após o pipeline de ingresso, o bloco \texttt{IngressDeparser} reconstrói
+os cabeçalhos estruturados em um fluxo binário de pacotes.
+Esse fluxo segue para o gerenciador de tráfego (\textit{Traffic Manager}),
+composto pelo motor de replicação (\textit{Packet Buffer and Replication Engine} -- PRE)
+e pela máquina de enfileiramento (\textit{Buffer Queuing Engine} -- BQE).
+Na saída da fila física, o pacote ingressa no pipeline de egress,
+iniciando pelo parser de saída (\textit{EgressParser}).
+Em seguida, o bloco de controle \texttt{Egress} executa modificações finais nos cabeçalhos,
+e o bloco \texttt{EgressDeparser} atualiza os códigos de verificação (\textit{checksums})
+e serializa o pacote para a interface física de rede final.
 
+\section{A Heurística P4Drop}
+\label{sec:p4drop}
 
+A heurística P4Drop, proposta por Xiao et al.~\cite{xiao2025p4drop},
+opera inteiramente no plano de dados do comutador.
+Seu objetivo é mitigar ataques de falsificação de IP (\textit{IP Spoofing}) baseados em TCP
+de forma autônoma e sem sobrecarga no plano de controle.
+Para isso, o P4Drop implementa um mecanismo de desafio-resposta
+que atua nas duas primeiras etapas do pipeline do PSA:
+no \textit{IngressParser} e no bloco de controle de ingresso (\textit{Ingress}).
+A etapa de \textit{IngressParser} é apenas responsável por extrair os cabeçalhos Ethernet, IP e TCP (veja Seção~\ref{sec:p4:iparser}).
+Esta seção apresenta com mais detalhes a lógica do P4Drop, que se encontra no \textit{Ingress} (Seção~\ref{sec:p4:ingress}).
+Cabe ressaltar que a especificação e a estrutura de registradores descritas a seguir
+correspondem a uma implementação auxiliada por Inteligência Artificial (IA),
+a qual diverge levemente do protótipo original proposto pelos autores.
 
+Para gerenciar o estado dos fluxos,
+o P4Drop utiliza um conjunto de registradores persistentes organizados em tabelas de estado.
+A Tabela~\ref{tab:p4drop:registradores} lista cada registrador,
+seu respectivo tamanho em bits e sua função no switch.
 
+\begin{table}[h]
+\centering
+\caption{Registradores persistentes utilizados no P4Drop.}
+\label{tab:p4drop:registradores}
+\begin{tabular}{|l|c|p{7.5cm}|}
+\hline
+\textbf{Registrador} & \textbf{Largura (bits)} & \textbf{Descrição} \\ \hline
+\texttt{reg\_srcIP} & 32 & Endereço IP de origem para validação do fluxo. \\ \hline
+\texttt{reg\_dstIP} & 32 & Endereço IP de destino para validação do fluxo. \\ \hline
+\texttt{reg\_maxSeq} & 32 & Maior número de sequência TCP visto no fluxo. \\ \hline
+\texttt{reg\_gapStart} & 32 & Início da lacuna do número de sequência descartado. \\ \hline
+\texttt{reg\_gapLen} & 14 & Tamanho em bytes da lacuna descartada. \\ \hline
+\texttt{reg\_n\_noRTX} & 5 & Contador de novos pacotes sem retransmissão correspondente. \\ \hline
+\texttt{reg\_hasDropped} & 1 & Flag booleana que indica se o teste de descarte já ocorreu. \\ \hline
+\texttt{reg\_H1} & 5 & Acumulador de confiança para a hipótese de malha fechada $H_1$. \\ \hline
+\texttt{reg\_H2} & 5 & Acumulador de confiança para a hipótese de malha aberta $H_2$. \\ \hline
+\texttt{reg\_total\_pkts} & 32 & Contador total de pacotes processados no fluxo. \\ \hline
+\texttt{reg\_dup\_pkts} & 5 & Contador de pacotes duplicados recebidos no fluxo. \\ \hline
+\texttt{reg\_last\_seq} & 32 & Último número de sequência observado para detecção de duplicatas. \\ \hline
+\end{tabular}
+\end{table}
 
-\section{P4Drop}
+Estes registradores atuam de forma combinada no plano de dados.
+Os campos \texttt{reg\_srcIP} e \texttt{reg\_dstIP} verificam a identidade do fluxo em slots compartilhados por hashing.
+Os campos de controle \texttt{reg\_maxSeq} e \texttt{reg\_last\_seq} monitoram a progressão dos números de sequência TCP.
+Para avaliar a retransmissão de pacotes perdidos, os registradores \texttt{reg\_gapStart} e \texttt{reg\_gapLen}
+registram as coordenadas exatas da lacuna do pacote descartado no teste de descarte ativo.
+A flag \texttt{reg\_hasDropped} previne descartes repetidos em um mesmo fluxo.
+A contagem de pacotes que violam o tempo de retransmissão incrementa o registrador \texttt{reg\_n\_noRTX}.
+Os acumuladores \texttt{reg\_H1} e \texttt{reg\_H2} guardam os níveis de confiança e desconfiança do fluxo,
+auxiliado pelos contadores \texttt{reg\_total\_pkts} e \texttt{reg\_dup\_pkts} para controle de duplicatas.
+Nas subseções a seguir, detalha-se como esses campos operam nas etapas da heurística.
 
+\subsection{Módulo de Teste de Descarte Ativo}
 
+O princípio fundamental do P4Drop reside no Teste de Descarte Ativo (\textit{Active Drop Test}).
+Quando um novo fluxo TCP é identificado na rede,
+o comutador descarta intencionalmente o primeiro pacote de dados recebido que possua carga útil (\textit{payload}).
+Antes de realizar o descarte, o switch registra o intervalo de bytes perdidos,
+conhecido como lacuna de sequência (\textit{sequence gap}), nos registradores de estado.
+A lacuna é definida pela tupla $[GapStart, GapLen]$, em que:
+- $GapStart$ armazena o número de sequência original do pacote descartado (\texttt{reg\_gapStart});
+- $GapLen$ registra o tamanho em bytes do payload do mesmo pacote (\texttt{reg\_gapLen}).
+
+Para fluxos legítimos operando em malha fechada (isto é, sob controle de congestionamento TCP),
+a pilha de protocolos do emissor retransmitirá o pacote perdido após um tempo limite.
+Uma retransmissão válida é detectada quando o número de sequência do pacote recebido
+satisfaz a seguinte condição de cobertura de lacuna:
+\begin{equation}
+TCP.seqNo \le GapStart \quad \land \quad TCP.nextSeqNo \ge GapStart + GapLen
+\end{equation}
+
+\subsection{Classificação e Mecanismo de Confiança}
+
+Para gerenciar o estado de confiança de cada fluxo, o P4Drop classifica
+cada pacote de entrada em uma de três categorias:
+- \textbf{Pacote Novo:} se o número de sequência for maior que o máximo observado até então (\texttt{reg\_maxSeq});
+- \textbf{Retransmissão:} se o pacote preencher e cobrir a lacuna registrada;
+- \textbf{Duplicata:} se o pacote apresentar uma sequência menor que o máximo, sem corresponder à retransmissão esperada.
+
+A partir dessa classificação, a heurística atualiza dois acumuladores de confiança,
+representando hipóteses concorrentes sobre a legitimidade do fluxo:
+- $H_1$: grau de certeza de que o fluxo é legítimo e opera em malha fechada;
+- $H_2$: grau de certeza de que o fluxo é falso (não loop / spoofed).
+
+Quando uma retransmissão válida é observada, o valor de $H_1$ é incrementado.
+Se o fluxo transmitir um limite predefinido de pacotes $n_{noRTX} = 13$ sem que
+a retransmissão ocorra, o valor de $H_2$ é incrementado.
+Para evitar que atacantes simulem retransmissões por meio do envio massivo de pacotes repetidos,
+o comutador avalia a taxa de duplicatas $f_{dup}$.
+Caso o número de pacotes duplicados exceda a proporção limite de $1/T_2 = 14,3\%$ (onde $T_2 = 7$),
+o acumulador $H_2$ é penalizado.
+
+O nível de desconfiança do fluxo é então calculado no datapath pela fórmula:
+\begin{equation}
+DistrustLevel = H_2 - H_1 + 1
+\end{equation}
+Se o $DistrustLevel$ ultrapassar um limiar de segurança $T$, o fluxo é classificado como fraudulento.
+Pacotes de fluxos classificados como fraudulentos são descartados ativamente.
+Para mitigar os efeitos de falsos positivos sobre fluxos legítimos,
+o comutador continua amostrando o tráfego bloqueado com uma probabilidade de descarte ativo de $p_{drop} = 5\%$.
+Caso o fluxo venha a cumprir o teste de retransmissão durante essa amostragem,
+o estado de confiança é reconfigurado e o tráfego volta a ser encaminhado normalmente.
+
+Cabe destacar que, na implementação prática do datapath analisada neste trabalho,
+a lógica de cálculo do nível de desconfiança é simplificada em relação ao modelo conceitual de duas hipóteses ($H_1$ e $H_2$).
+Em vez de computar dinamicamente a diferença $DistrustLevel = H_2 - H_1 + 1$ a cada pacote,
+a implementação gerencia o estado diretamente através do registrador persistente \texttt{reg\_distrust}.
+O comportamento lógico dessa representação unificada opera sob as seguintes regras:
+\begin{itemize}
+    \item \textbf{Inicialização:} Na chegada de um fluxo inédito identificado por hashing,
+    o registrador \texttt{reg\_distrust} é inicializado com valor zero.
+    \item \textbf{Reforço de Legitimidade (Decréscimo):} Quando ocorre uma retransmissão válida
+    que preenche a lacuna do teste de descarte ativo, a desconfiança é decrementada (\texttt{distrust = distrust - 1}).
+    Para manter a consistência e evitar estouro negativo na aritmética inteira,
+    o valor é limitado inferiormente em zero.
+    \item \textbf{Penalização por Falta de Retransmissão (Acréscimo):} Caso o fluxo transmita novos pacotes
+    sem responder ao desafio, o switch incrementa a desconfiança (\texttt{distrust = distrust + 1}) a cada ciclo
+    de $n_{noRTX} = 13$ pacotes.
+    \item \textbf{Penalização por Taxa de Duplicatas (Acréscimo):} Se a frequência de pacotes repetidos
+    exceder a proporção limite de $14,3\%$, a desconfiança é incrementada (\texttt{distrust = distrust + 1}).
+    Tanto para a falta de retransmissão quanto para duplicatas,
+    o valor do registrador é limitado superiormente em 31.
+    \item \textbf{Ações de Bloqueio e Amostragem:} Se o valor de \texttt{reg\_distrust} atingir o limiar $T$ (definido como 5),
+    o fluxo é considerado fraudulento e seus pacotes são descartados.
+    Se o fluxo estiver bloqueado mas sua desconfiança for menor que o valor máximo (31),
+    o switch realiza descartes probabilísticos de 5\% como teste ativo secundário.
+    Se a retransmissão ocorrer nesse período, o fluxo retorna ao estado legítimo e o contador decresce.
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+    node distance=1.2cm and 1.8cm,
+    block/.style={rectangle, draw, fill=blue!5, text width=3.2cm, text centered, rounded corners, minimum height=1cm, font=\scriptsize},
+    decision/.style={diamond, draw, fill=orange!5, text width=1.8cm, text centered, minimum height=0.8cm, inner sep=0pt, font=\scriptsize},
+    line/.style={draw, -{Latex[scale=1.2]}, thick},
+    every node/.style={font=\scriptsize}
+]
+    % Nodes
+    \node [block] (start) {\textbf{Pacote TCP Chega}};
+    \node [decision, below=of start] (newflow) {Fluxo Novo?};
+    \node [block, right=of newflow] (activedrop) {Descarte Ativo\\(Teste de Descarte)\\gapStart = seqNo\\gapLen = payload\\hasDropped = 1};
+    \node [decision, below=of newflow] (checkdrop) {hasDropped == 1?};
+    \node [decision, below=of checkdrop] (isrtx) {Cobre Lacuna?};
+    \node [block, right=of isrtx] (rtxok) {Retransmissão Válida\\hasDropped = 0\\distrust = distrust - 1};
+    \node [decision, below=of isrtx] (newpkt) {seqNo > maxSeq?};
+    \node [block, right=of newpkt] (nortx) {n\_noRTX++\\(se >= 13, distrust++)};
+    \node [decision, below=of newpkt] (dup) {Duplicata?};
+    \node [block, right=of dup] (dupok) {Se f\_dup > 14\%\\distrust++};
+    \node [decision, below=of dup] (blockcheck) {distrust >= T?};
+    \node [block, below=of blockcheck] (forward) {Encaminhar Pacote};
+    \node [block, left=of blockcheck] (dropflow) {Bloquear Fluxo\\(Amostragem 5\%)};
+
+    % Connections
+    \path [line] (start) -- (newflow);
+    \path [line] (newflow) -- node[above] {Sim} (activedrop);
+    \path [line] (newflow) -- node[left] {Não} (checkdrop);
+    \path [line] (checkdrop) -- node[left] {Sim} (isrtx);
+    \path [line] (checkdrop) -- node[right, near start] {Não} (forward);
+    \path [line] (isrtx) -- node[above] {Sim} (rtxok);
+    \path [line] (isrtx) -- node[left] {Não} (newpkt);
+    \path [line] (newpkt) -- node[above] {Sim} (nortx);
+    \path [line] (newpkt) -- node[left] {Não} (dup);
+    \path [line] (dup) -- node[above] {Sim} (dupok);
+    \path [line] (dup) -- node[left] {Não} (blockcheck);
+    \path [line] (blockcheck) -- node[left] {Não} (forward);
+    \path [line] (blockcheck) -- node[above] {Sim} (dropflow);
+
+    % Loops/returns
+    \path [line] (activedrop.east) -- ++(0.5,0) |- (forward.east);
+    \path [line] (rtxok.east) -- ++(0.5,0) |- (forward.east);
+    \path [line] (nortx.east) -- ++(0.5,0) |- (forward.east);
+    \path [line] (dupok.east) -- ++(0.5,0) |- (forward.east);
+
+\end{tikzpicture}
+\caption{Fluxograma do processamento de pacotes e atualização da confiança no plano de dados do P4Drop.}
+\label{fig:p4drop:flowchart}
+\end{figure}
 
 \section{P4DropExt}
 
@@ -248,12 +460,10 @@ Isso impactaria significativamente o tamanho do registro associado ao fluxo, pen
 Em particular, o tamanho do registro aumenta de 25 bytes para 49 bytes.
 
 
-\section{Experimentos}
+\section{Avaliação}
 
-Falar o objetivo dos experimentos.
-Primeira leva de experimentos: "validar" implementação do P4Drop.
-Segunda leva: "validar" implementação do P4DropExt.
-Terceira leva: Testes de estresse (não sei se vai dar pra fazer. Acho que meu computador vai chorar muito).
+O objetivo da avaliação proposta neste trabalho é validar a implementação baseline e compará-la com a adaptação dual-stack.
+
 
 \section{Resultados}
 
