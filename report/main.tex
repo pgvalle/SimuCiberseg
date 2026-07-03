@@ -19,7 +19,8 @@
 
 % Custom P4 language definition for listings
 \lstdefinelanguage{P4}{
-  keywords={action, apply, control, default_action, drop, exit, header, headers, parser, state, struct, table, transition, select, bit, int, void, error, const, if, else, switch, return},
+  keywords={action, apply, control, default_action, drop, exit, header, headers, parser, state, struct,
+            table, transition, select, bit, int, void, error, const, if, else, switch, return},
   sensitive=true,
   morecomment=[l]{//},
   morecomment=[s]{/*}{*/},
@@ -91,35 +92,27 @@
 
 \section{Introdução}
 
-A segurança de redes é um aspecto de extrema relevância na infraestrutura atual da Internet.
-Infelizmente, atores maliciosos exploram continuamente vulnerabilidades inerentes aos protocolos de rede para orquestrar ataques e comprometer sistemas.
-O protocolo TCP, por não ter sido projetado com um foco primário em segurança, é um alvo frequente.
-Técnicas de ataque exploram o processo de estabelecimento de conexão,
-como é o caso do TCP SYN Flood, para exaurir os recursos dos servidores.
-Esse tipo de ataque frequentemente se apoia no IP Spoofing (falsificação de endereço IP),
-uma técnica onde o atacante forja o endereço IP de origem dos pacotes para personificar fontes confiáveis.
-Tais ataques podem servir como base de outros, incluindo sequestro de sessão,
-ataques de homem-no-meio (man-in-the-middle) e ataques de negação de serviço (DoS).
-
-Ao longo dos anos, diversas tecnologias surgiram para fornecer uma infraestrutura de segurança mais robusta contra essas ameaças.
+Ao longo dos anos, diversas tecnologias surgiram para fornecer uma infraestrutura mais robusta contra ameaças de cibersegurança em redes.
 Dentre elas, o advento dos comutadores programáveis de pacotes representa uma mudança de paradigma.
 Esses dispositivos conseguem processar bilhões de pacotes por segundo (throughput na ordem de Tbps) e realizar inspeção de pacotes em tempo real.
 Através de linguagens de domínio específico, como P4 (Programming Protocol-independent Packet Processors),
-tornou-se possível customizar o processamento de cabeçalhos, a manipulação de metadados e a lógica de encaminhamento diretamente no plano de dados.
-Isso permite implementar políticas de segurança ágeis que identificam e respondem ao tráfego malicioso antes de sua entrada efetiva na rede,
+tornou-se possível customizar o processamento de cabeçalhos e a lógica de encaminhamento diretamente no plano de dados.
+Isso permite implementar políticas de segurança ágeis que identificam e respondem a tráfego malicioso antes de sua entrada efetiva na rede,
 evitando gargalos de comunicação e latência que são comuns em soluções dependentes do plano de controle.
 
 Aproveitando o potencial dessa arquitetura, Xiao et al. propuseram o P4Drop,
-uma função heurística implementada no plano de dados programável para filtrar ataques de TCP spoofing de forma autônoma.
-O P4Drop estabelece um mecanismo de confiança baseado no descarte ativo de pacotes dos fluxos e na espera de suas respectivas retransmissões,
-permitindo distinguir fluxos em malha fechada de tráfego falsificado.
-Os resultados experimentais da solução demonstraram bloqueio de 98,6\% dos pacotes de ataque sob cenários de alta densidade.
+uma função heurística para mitigar ataques TCP baseados em \textit{IP spoofing}~\cite{p4drop}.
+O \textit{IP spoofing} consiste na criação de pacotes com um endereço IP falsificado,
+seja para ocultar a identidade do remetente ou personificar um sistema legítimo~\cite{wiki:ip_spoofing}.
+Para mitigar essa ameaça, o P4Drop estabelece um mecanismo de confiança baseado no descarte ativo de pacotes dos fluxos TCP.
+O princípio básico reside na confiabilidade do TCP: fluxos legitimos vão retransmitir os pacotes descartados, diferentemente dos fluxos falsos.
+Os resultados experimentais da proposta original demonstraram o bloqueio de 98,6\% dos pacotes maliciosos.
 
-Apesar dos bons resultados, a heurística do P4Drop apresenta limitações arquiteturais,
+No entanto, a heurística do P4Drop apresenta limitações arquiteturais,
 uma vez que foi modelado para funcionar exclusivamente com IPv4.
-Com a adoção maciça e irreversível do IPv6, as redes modernas operam majoritariamente em pilha dupla ou puramente IPv6.
+Com a adoção maciça e irreversível do IPv6, as redes modernas operam majoritariamente em pilha dupla.
 Neste contexto, o presente trabalho apresenta o P4DropExt,
-que adapta o P4Drop para operar nativamente em redes IPv6 e IPv4.
+uma adaptação do P4Drop para operar nativamente em redes IPv6 e IPv4.
 (Falar algo sobre os resultados na versão final)
 
 (falar como está a organização do artigo; sujeito a mudanças)
@@ -137,8 +130,8 @@ Essas etapas compreendem: (1) parser de ingresso (\textit{IngressParser});
 (2) processamento de ingresso (\textit{Ingress}), (3) deparser de ingresso (\textit{IngressDeparser}),
 (4) gerenciador de tráfego (\textit{Traffic Manager}), (5) parser de egresso (\textit{EgressParser}),
 (6) processamento de egresso (\textit{Egress}) e (7) deparser de egresso (\textit{EgressDeparser})~\cite{p4_psa_spec}.
-O foco principal desta seção é apresentar o \textit{IngressParser} e o \textit{Ingress} para melhor compreensão do P4Drop,
-apresentado na Seção~\ref{sec:p4drop}.
+O objetivo desta seção é apresentar o \textit{IngressParser} e o \textit{Ingress} para melhor compreensão do P4Drop e do P4DropExt,
+que são o foco das Seções~\ref{sec:p4drop} e ~\ref{sec:p4drop-ext}.
 
 \subsection{IngressParser}
 \label{sec:p4:iparser}
@@ -159,9 +152,9 @@ parser MyParser(packet_in packet, out headers hdr, inout metadata meta,
     state parse_ethernet {
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
-            TYPE_ARP  : parse_arp;
-            TYPE_IPV4 : parse_ipv4;
-            default   : accept;
+            TYPE_ARP: parse_arp;
+            TYPE_IPV4: parse_ipv4;
+            default: accept;
         }
     }
 
@@ -173,7 +166,7 @@ parser MyParser(packet_in packet, out headers hdr, inout metadata meta,
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
-            6      : parse_tcp; // TCP = 6
+            6: parse_tcp; // TCP = 6
             default: accept;
         }
     }
@@ -186,7 +179,6 @@ parser MyParser(packet_in packet, out headers hdr, inout metadata meta,
 \end{lstlisting}
 
 A Listagem~\ref{lst:parser} mostra o \textit{IngressParser} do P4Drop.
-Note que trata-se de uma máquina de estados finitos.
 O estado inicial \texttt{start} (linhas~3--5) inicia o processamento do pacote
 e transiciona imediatamente para o estado \texttt{parse\_ethernet}.
 Em \texttt{parse\_ethernet} (linhas~7--14), o parser extrai o cabeçalho Ethernet (linha~8)
@@ -199,6 +191,7 @@ o cabeçalho IPv4 (linha~22) e avalia o campo do protocolo (linha~23).
 Por fim, se o protocolo encapsulado corresponder ao TCP (indicado pelo valor 6 na linha~24),
 o parser realiza a extração do cabeçalho TCP no estado \texttt{parse\_tcp} (linhas~29--32)
 antes de aceitar e encerrar o processamento do pacote.
+Note que o \textit{IngressParser} se trata de uma máquina de estados finitos.
 
 \subsection{Ingress}
 \label{sec:p4:ingress}
@@ -275,16 +268,14 @@ e serializa o pacote para a interface física de rede final.
 
 A heurística P4Drop, proposta por Xiao et al.~\cite{xiao2025p4drop},
 opera inteiramente no plano de dados do comutador.
-Seu objetivo é mitigar ataques de falsificação de IP (\textit{IP Spoofing}) baseados em TCP
-de forma autônoma e sem sobrecarga no plano de controle.
-Para isso, o P4Drop implementa um mecanismo de desafio-resposta
-que atua nas duas primeiras etapas do pipeline do PSA:
-no \textit{IngressParser} e no bloco de controle de ingresso (\textit{Ingress}).
-A etapa de \textit{IngressParser} é apenas responsável por extrair os cabeçalhos Ethernet, IP e TCP (veja Seção~\ref{sec:p4:iparser}).
-Esta seção apresenta com mais detalhes a lógica do P4Drop, que se encontra no \textit{Ingress} (Seção~\ref{sec:p4:ingress}).
-Cabe ressaltar que a especificação e a estrutura de registradores descritas a seguir
-correspondem a uma implementação auxiliada por Inteligência Artificial (IA),
-a qual diverge levemente do protótipo original proposto pelos autores.
+Seu objetivo é mitigar ataques de falsificação de IP (\textit{IP Spoofing}) em fluxos TCP de forma autônoma e sem sobrecarga no plano de controle.
+Para isso, o P4Drop implementa um mecanismo de desafio-resposta que atua nas duas primeiras etapas do pipeline de um comutador programável:
+no \textit{IngressParser} e no bloco de \textit{Ingress}.
+A etapa de \textit{IngressParser} é apenas responsável por extrair os cabeçalhos Ethernet, IP e TCP (veja a Seção~\ref{sec:p4:iparser}).
+Esta seção apresenta com mais detalhes a lógica do P4Drop, que se encontra no \textit{Ingress} (veja a Seção~\ref{sec:p4:ingress}).
+Infelizmente, Xiao et al. não disponibilizaram uma implementação pronta.
+Logo, cabe ressaltar que a especificação e a estrutura de registradores descritas nesta seção
+correspondem a uma implementação própria feita com auxilio de Inteligência Artificial.
 
 Para gerenciar o estado dos fluxos,
 o P4Drop utiliza um conjunto de registradores persistentes organizados em tabelas de estado.
@@ -404,47 +395,54 @@ O comportamento lógico dessa representação unificada opera sob as seguintes r
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[
-    node distance=1.2cm and 1.8cm,
-    block/.style={rectangle, draw, fill=blue!5, text width=3.2cm, text centered, rounded corners, minimum height=1cm, font=\scriptsize},
-    decision/.style={diamond, draw, fill=orange!5, text width=1.8cm, text centered, minimum height=0.8cm, inner sep=0pt, font=\scriptsize},
+    node distance=0.8cm and 1.2cm,
+    block/.style={rectangle, draw, fill=blue!5, text width=3.2cm, text centered, rounded corners, minimum height=0.8cm, font=\scriptsize},
+    decision/.style={diamond, draw, fill=orange!5, text width=1.8cm, text centered, minimum height=0.7cm, inner sep=0pt, font=\scriptsize},
     line/.style={draw, -{Latex[scale=1.2]}, thick},
     every node/.style={font=\scriptsize}
 ]
-    % Nodes
+    % Central Column Nodes
     \node [block] (start) {\textbf{Pacote TCP Chega}};
-    \node [decision, below=of start] (newflow) {Fluxo Novo?};
-    \node [block, right=of newflow] (activedrop) {Descarte Ativo\\(Teste de Descarte)\\gapStart = seqNo\\gapLen = payload\\hasDropped = 1};
+    \node [decision, below=of start] (blockcheck) {distrust >= T?};
+    \node [decision, below=of blockcheck] (newflow) {Fluxo Novo?};
     \node [decision, below=of newflow] (checkdrop) {hasDropped == 1?};
     \node [decision, below=of checkdrop] (isrtx) {Cobre Lacuna?};
-    \node [block, right=of isrtx] (rtxok) {Retransmissão Válida\\hasDropped = 0\\distrust = distrust - 1};
     \node [decision, below=of isrtx] (newpkt) {seqNo > maxSeq?};
-    \node [block, right=of newpkt] (nortx) {n\_noRTX++\\(se >= 13, distrust++)};
-    \node [decision, below=of newpkt] (dup) {Duplicata?};
-    \node [block, right=of dup] (dupok) {Se f\_dup > 14\%\\distrust++};
-    \node [decision, below=of dup] (blockcheck) {distrust >= T?};
-    \node [block, below=of blockcheck] (forward) {Encaminhar Pacote};
-    \node [block, left=of blockcheck] (dropflow) {Bloquear Fluxo\\(Amostragem 5\%)};
+    \node [decision, below=of newpkt] (dup) {seqNo == last\_seq?};
+    \node [block, below=of dup] (forward) {Encaminhar Pacote};
+
+    % Left / Right Branches
+    \node [block, left=of blockcheck] (dropblock) {Bloquear Fluxo\\(Descarte Ativo 95\%)};
+    \node [block, right=of newflow] (activedrop) {Teste de Descarte\\gapStart = seqNo\\gapLen = payload\\hasDropped = 1\\Descarte Ativo (100\%)};
+    \node [block, right=of isrtx] (rtxok) {Retransmissão Válida\\hasDropped = 0\\distrust = distrust - 1};
+    \node [block, right=of newpkt] (nortx) {Atualizar maxSeq\\Se hasDropped == 1,\\n\_noRTX++ (se >=13, distrust++)};
+    \node [block, right=of dup] (dupok) {Duplicata Detectada\\Se f\_dup > 14\%\\distrust++};
 
     % Connections
-    \path [line] (start) -- (newflow);
+    \path [line] (start) -- (blockcheck);
+    \path [line] (blockcheck) -- node[above] {Sim} (dropblock);
+    \path [line] (blockcheck) -- node[left] {Não} (newflow);
     \path [line] (newflow) -- node[above] {Sim} (activedrop);
     \path [line] (newflow) -- node[left] {Não} (checkdrop);
+
     \path [line] (checkdrop) -- node[left] {Sim} (isrtx);
-    \path [line] (checkdrop) -- node[right, near start] {Não} (forward);
-    \path [line] (isrtx) -- node[above] {Sim} (rtxok);
+    \path [line] (checkdrop.west) -- node[left, near start] {Não} ++(-0.8,0) |- (newpkt.west);
+
     \path [line] (isrtx) -- node[left] {Não} (newpkt);
-    \path [line] (newpkt) -- node[above] {Sim} (nortx);
+    \path [line] (isrtx) -- node[above] {Sim} (rtxok);
+
     \path [line] (newpkt) -- node[left] {Não} (dup);
+    \path [line] (newpkt) -- node[above] {Sim} (nortx);
+
+    \path [line] (dup) -- node[left] {Não} (forward);
     \path [line] (dup) -- node[above] {Sim} (dupok);
-    \path [line] (dup) -- node[left] {Não} (blockcheck);
-    \path [line] (blockcheck) -- node[left] {Não} (forward);
-    \path [line] (blockcheck) -- node[above] {Sim} (dropflow);
 
     % Loops/returns
-    \path [line] (activedrop.east) -- ++(0.5,0) |- (forward.east);
-    \path [line] (rtxok.east) -- ++(0.5,0) |- (forward.east);
-    \path [line] (nortx.east) -- ++(0.5,0) |- (forward.east);
-    \path [line] (dupok.east) -- ++(0.5,0) |- (forward.east);
+    \path [line] (dropblock.south) |- (forward.west);
+    \path [line] (activedrop.east) -- ++(0.6,0) |- (forward.east);
+    \path [line] (rtxok.east) -- ++(0.6,0) |- (forward.east);
+    \path [line] (nortx.east) -- ++(0.6,0) |- (forward.east);
+    \path [line] (dupok.east) -- ++(0.6,0) |- (forward.east);
 
 \end{tikzpicture}
 \caption{Fluxograma do processamento de pacotes e atualização da confiança no plano de dados do P4Drop.}
@@ -452,6 +450,7 @@ O comportamento lógico dessa representação unificada opera sob as seguintes r
 \end{figure}
 
 \section{P4DropExt}
+\label{sec:p4drop-ext}
 
 IPv4 e IPv6 possuem várias diferenças.
 Dentre elas, uma notável é o tamanho dos endereços.
@@ -461,9 +460,94 @@ Em particular, o tamanho do registro aumenta de 25 bytes para 49 bytes.
 
 
 \section{Avaliação}
+\label{sec:avaliacao}
 
-O objetivo da avaliação proposta neste trabalho é validar a implementação baseline e compará-la com a adaptação dual-stack.
+Esta seção descreve a metodologia e as métricas empregadas para validar as implementações
+e comparar a eficácia do P4Drop com a adaptação dual-stack P4DropExt.
 
+\subsection{Ambiente de Simulação e Topologia}
+
+As simulações foram executadas utilizando a ferramenta \texttt{p4app},
+a qual automatiza o processo de compilação dos programas P4 e gerencia a criação
+de uma infraestrutura de rede virtualizada via emulador Mininet.
+Os comutadores de software operam com base no modelo comportamental \textit{Behavioral Model v2} (BMv2).
+A topologia de rede adotada é composta por um hospedeiro de origem,
+conectado a um hospedeiro de destino por meio do switch programável executando o datapath P4.
+
+Para fins de validação e análise estatística, cada cenário experimental foi executado $R = 5$ vezes de forma independente.
+Em cada rodada de simulação, o tráfego é composto por 100 fluxos concorrentes baseados no protocolo TCP,
+distribuídos em 90 fluxos legítimos (gerando tráfego com o mesmo endereço IP de origem, mas com portas de origem diferentes);
+e 10 fluxos falsificados (gerando tráfego de ataque com endereços IP de origem forjados).
+
+O tráfego de carga útil é do tipo \texttt{bulksend},
+de modo a simular transmissões massivas e contínuas de pacotes de dados.
+A duração total de cada execução de simulação foi definida em 100 segundos.
+Para avaliar a reação dinâmica da heurística no switch,
+os fluxos legítimos operam de forma contínua durante toda a simulação,
+enquanto o ataque de falsificação é iniciado no segundo 30 e encerrado no segundo 90.
+
+Os fluxos de ataque (falsificados) são gerados com o intuito de tentar burlar a validação do P4Drop.
+Para tanto, o atacante adota uma probabilidade fixa de 10\% para simular retransmissões de pacotes TCP,
+visando convencer o comutador de que se trata de um fluxo legítimo operando em malha fechada.
+Para avaliar a robustez do switch contra diferentes sofisticações de ataque,
+foram implementados dois mecanismos distintos para essa simulação de retransmissão:
+\begin{itemize}
+    \item \textbf{Modelo Sem Histórico (\textit{No-Backlog}):} O atacante simula as retransmissões
+    repetindo estritamente o número de sequência do último pacote que foi enviado.
+    \item \textbf{Modelo Com Histórico (\textit{Backlog}):} O atacante mantém uma fila de histórico
+    com capacidade para armazenar os últimos 32 números de sequência transmitidos.
+    A simulação de retransmissão é executada selecionando e repetindo um número de sequência
+    aleatório contido nesse histórico.
+\end{itemize}
+
+\subsection{Métricas de Desempenho}
+
+Para analisar o comportamento do P4Drop e do P4DropExt,
+foram avaliadas duas métricas fundamentais:
+
+\begin{enumerate}
+    \item \textbf{Razão de Entrega de Pacotes:} Representa o percentual total de pacotes de dados enviados
+    que alcançaram o destino final com sucesso. Essa métrica é dividida em duas taxas:
+    \begin{itemize}
+        \item \textit{Legitimate Delivery Rate} (LDR): indica a proporção de tráfego legítimo encaminhado,
+        sendo desejável que o valor seja próximo a 100\%;
+        \item \textit{Attack Leak Rate} (ALR): indica a proporção de pacotes falsificados que evadiram
+        o bloqueio do switch e alcançaram o destino, sendo desejável que esse valor seja o mais próximo de 0\% possível.
+    \end{itemize}
+    As taxas de LDR e ALR são calculadas pelas Equações~(\ref{eq:eval:ldr}) e~(\ref{eq:eval:alr}):
+    \begin{equation}
+        LDR = \frac{N_{L}}{N_{S}} \times 100\%
+        \label{eq:eval:ldr}
+    \end{equation}
+    \begin{equation}
+        ALR = \frac{A_{L}}{A_{S}} \times 100\%
+        \label{eq:eval:alr}
+    \end{equation}
+    em que $N_{L}$ e $N_{S}$ representam os pacotes legítimos recebidos e enviados, respectivamente,
+    enquanto $A_{L}$ e $A_{S}$ denotam os pacotes de ataque vazados (recebidos) e transmitidos, respectivamente.
+    Para representar a variabilidade dessas taxas ao longo das rodadas, os resultados são reportados
+    com barras de erro correspondentes ao Erro Padrão da Média (SEM - \textit{Standard Error of the Mean}), dado por:
+    \begin{equation}
+        SEM = \frac{S}{\sqrt{R}}
+        \label{eq:eval:sem}
+    \end{equation}
+    em que $S$ representa o desvio padrão amostral das taxas LDR e ALR, e $R = 5$ é o número de rodadas.
+
+    \item \textbf{Probabilidade de Entrega por Índice de Pacote:} Permite analisar a velocidade de reação
+    da heurística no plano de dados independente do fator tempo.
+    Para o conjunto consolidado de fluxos de ataque obtido ao longo de todas as rodadas,
+    representando uma população total de $M = R \times F = 50$ fluxos maliciosos,
+    define-se para cada fluxo $i \in \{1, 2, \dots, M\}$ um perfil de entrega
+    $P_i = [p_{i,1}, p_{i,2}, \dots, p_{i,K}]$, no qual $p_{i,k} = 1$ caso o $k$-ésimo pacote cronológico
+    daquele fluxo tenha sido encaminhado com sucesso, e $p_{i,k} = 0$ se tiver sido descartado pelo switch.
+    A probabilidade de entrega para o $k$-ésimo pacote, $P(k)$, é computada pela média:
+    \begin{equation}
+        P(k) = \frac{1}{M} \sum_{i=1}^{M} p_{i,k}
+        \label{eq:eval:profile}
+    \end{equation}
+    Essa métrica indica quantos pacotes de ataque conseguem vazar e atravessar o comutador
+    antes que o fluxo seja definitivamente bloqueado (isto é, até que a probabilidade $P(k)$ caia para a taxa residual de amostragem de 5\%).
+\end{enumerate}
 
 \section{Resultados}
 
