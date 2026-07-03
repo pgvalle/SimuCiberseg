@@ -232,8 +232,7 @@ control MyIngress(inout headers hdr,
     register<bit<8>>(FLOW_TABLE_SIZE) reg_n_noRTX;
     register<bit<1>>(FLOW_TABLE_SIZE) reg_hasDropped;
     // Paper specifics:
-    register<bit<5>>(FLOW_TABLE_SIZE) reg_H1;
-    register<bit<5>>(FLOW_TABLE_SIZE) reg_H2;
+    register<bit<5>>(FLOW_TABLE_SIZE) reg_distrust;
     register<bit<32>>(FLOW_TABLE_SIZE) reg_total_pkts;
     register<bit<5>>(FLOW_TABLE_SIZE) reg_dup_pkts;
     register<bit<32>>(FLOW_TABLE_SIZE) reg_last_seq;
@@ -307,8 +306,7 @@ control MyIngress(inout headers hdr,
                     bit<16> r_gapLen;
                     bit<8> r_n_noRTX;
                     bit<1> r_hasDropped;
-                    bit<5> r_H1;
-                    bit<5> r_H2;
+                    bit<5> r_distrust;
                     bit<32> r_total_pkts;
                     bit<5> r_dup_pkts;
                     bit<32> r_last_seq;
@@ -319,8 +317,7 @@ control MyIngress(inout headers hdr,
                     reg_gapLen.read(r_gapLen, hash_idx);
                     reg_n_noRTX.read(r_n_noRTX, hash_idx);
                     reg_hasDropped.read(r_hasDropped, hash_idx);
-                    reg_H1.read(r_H1, hash_idx);
-                    reg_H2.read(r_H2, hash_idx);
+                    reg_distrust.read(r_distrust, hash_idx);
                     reg_total_pkts.read(r_total_pkts, hash_idx);
                     reg_dup_pkts.read(r_dup_pkts, hash_idx);
                     reg_last_seq.read(r_last_seq, hash_idx);
@@ -338,8 +335,7 @@ control MyIngress(inout headers hdr,
                         reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
                         reg_n_noRTX.write(hash_idx, 0);
                         reg_hasDropped.write(hash_idx, 1);
-                        reg_H1.write(hash_idx, 0);
-                        reg_H2.write(hash_idx, 0);
+                        reg_distrust.write(hash_idx, 0);
                         reg_total_pkts.write(hash_idx, 1);
                         reg_dup_pkts.write(hash_idx, 0);
                         reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
@@ -347,12 +343,7 @@ control MyIngress(inout headers hdr,
                         // Trigger active drop
                         drop();
                     } else {
-                        bit<5> calculated_distrust;
-                        if (r_H2 + 1 >= r_H1) {
-                            calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
-                        } else {
-                            calculated_distrust = 0; // Clamped to 0
-                        }
+                        bit<5> calculated_distrust = r_distrust;
                         bit<32> tcp_next_seq = hdr.tcp.seqNo + tcp_payload_len;
                         bit<32> gap_end = r_gapStart + (bit<32>)r_gapLen;
                         bit<1> retransmits_gap = 0;
@@ -366,8 +357,11 @@ control MyIngress(inout headers hdr,
 
                         if (retransmits_gap == 1) {
                             // Legitimate flow retransmitted the actively dropped packet.
-                            r_H1 = r_H1 + 1;
-                            reg_H1.write(hash_idx, r_H1);
+                            if (r_distrust > 0) {
+                                r_distrust = r_distrust - 1;
+                            }
+                            reg_distrust.write(hash_idx, r_distrust);
+                            calculated_distrust = r_distrust;
                             reg_n_noRTX.write(hash_idx, 0);
                             reg_hasDropped.write(hash_idx, 0);
                             ipv4_nhop.apply();
@@ -389,8 +383,11 @@ control MyIngress(inout headers hdr,
                             bit<32> threshold_check = (bit<32>)next_dup * 7;
                             if (threshold_check >= next_total && next_total > 10) {
                                 // Penalty for excessive duplicates
-                                r_H2 = r_H2 + 1;
-                                reg_H2.write(hash_idx, r_H2);
+                                if (r_distrust < 31) {
+                                    r_distrust = r_distrust + 1;
+                                }
+                                reg_distrust.write(hash_idx, r_distrust);
+                                calculated_distrust = r_distrust;
                                 reg_dup_pkts.write(hash_idx, 0);
                                 reg_total_pkts.write(hash_idx, 1);
                             }
@@ -403,19 +400,15 @@ control MyIngress(inout headers hdr,
                                     bit<8> next_n_noRTX = r_n_noRTX + 1;
                                     reg_n_noRTX.write(hash_idx, next_n_noRTX);
                                     if (next_n_noRTX >= N_NORTX_THRESHOLD_LEGITIMATE) {
-                                        // Increase H2 (mistrust)
-                                        r_H2 = r_H2 + 1;
-                                        reg_H2.write(hash_idx, r_H2);
+                                        // Increase distrust directly
+                                        if (r_distrust < 31) {
+                                            r_distrust = r_distrust + 1;
+                                        }
+                                        reg_distrust.write(hash_idx, r_distrust);
+                                        calculated_distrust = r_distrust;
                                         // Reset n_noRTX
                                         reg_n_noRTX.write(hash_idx, 0);
                                     }
-                                }
-
-                                // Re-calculate distrust dynamically after updates
-                                if (r_H2 + 1 >= r_H1) {
-                                    calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
-                                } else {
-                                    calculated_distrust = 0;
                                 }
 
                                 // Probabilistic drop (5%) if in ambiguous state (distrust > 0)
@@ -511,8 +504,7 @@ control MyIngress(inout headers hdr,
                     bit<16> r_gapLen;
                     bit<8> r_n_noRTX;
                     bit<1> r_hasDropped;
-                    bit<5> r_H1;
-                    bit<5> r_H2;
+                    bit<5> r_distrust;
                     bit<32> r_total_pkts;
                     bit<5> r_dup_pkts;
                     bit<32> r_last_seq;
@@ -523,8 +515,7 @@ control MyIngress(inout headers hdr,
                     reg_gapLen.read(r_gapLen, hash_idx);
                     reg_n_noRTX.read(r_n_noRTX, hash_idx);
                     reg_hasDropped.read(r_hasDropped, hash_idx);
-                    reg_H1.read(r_H1, hash_idx);
-                    reg_H2.read(r_H2, hash_idx);
+                    reg_distrust.read(r_distrust, hash_idx);
                     reg_total_pkts.read(r_total_pkts, hash_idx);
                     reg_dup_pkts.read(r_dup_pkts, hash_idx);
                     reg_last_seq.read(r_last_seq, hash_idx);
@@ -542,8 +533,7 @@ control MyIngress(inout headers hdr,
                         reg_gapLen.write(hash_idx, (bit<16>)tcp_payload_len);
                         reg_n_noRTX.write(hash_idx, 0);
                         reg_hasDropped.write(hash_idx, 1);
-                        reg_H1.write(hash_idx, 0);
-                        reg_H2.write(hash_idx, 0);
+                        reg_distrust.write(hash_idx, 0);
                         reg_total_pkts.write(hash_idx, 1);
                         reg_dup_pkts.write(hash_idx, 0);
                         reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
@@ -551,12 +541,7 @@ control MyIngress(inout headers hdr,
                         // Trigger active drop
                         drop();
                     } else {
-                        bit<5> calculated_distrust;
-                        if (r_H2 + 1 >= r_H1) {
-                            calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
-                        } else {
-                            calculated_distrust = 0; // Clamped to 0
-                        }
+                        bit<5> calculated_distrust = r_distrust;
                         bit<32> tcp_next_seq = hdr.tcp.seqNo + tcp_payload_len;
                         bit<32> gap_end = r_gapStart + (bit<32>)r_gapLen;
                         bit<1> retransmits_gap = 0;
@@ -570,8 +555,11 @@ control MyIngress(inout headers hdr,
 
                         if (retransmits_gap == 1) {
                             // Legitimate flow retransmitted the actively dropped packet.
-                            r_H1 = r_H1 + 1;
-                            reg_H1.write(hash_idx, r_H1);
+                            if (r_distrust > 0) {
+                                r_distrust = r_distrust - 1;
+                            }
+                            reg_distrust.write(hash_idx, r_distrust);
+                            calculated_distrust = r_distrust;
                             reg_n_noRTX.write(hash_idx, 0);
                             reg_hasDropped.write(hash_idx, 0);
                             ipv6_nhop.apply();
@@ -593,8 +581,11 @@ control MyIngress(inout headers hdr,
                             bit<32> threshold_check = (bit<32>)next_dup * 7;
                             if (threshold_check >= next_total && next_total > 10) {
                                 // Penalty for excessive duplicates
-                                r_H2 = r_H2 + 1;
-                                reg_H2.write(hash_idx, r_H2);
+                                if (r_distrust < 31) {
+                                    r_distrust = r_distrust + 1;
+                                }
+                                reg_distrust.write(hash_idx, r_distrust);
+                                calculated_distrust = r_distrust;
                                 reg_dup_pkts.write(hash_idx, 0);
                                 reg_total_pkts.write(hash_idx, 1);
                             }
@@ -607,19 +598,15 @@ control MyIngress(inout headers hdr,
                                     bit<8> next_n_noRTX = r_n_noRTX + 1;
                                     reg_n_noRTX.write(hash_idx, next_n_noRTX);
                                     if (next_n_noRTX >= N_NORTX_THRESHOLD_LEGITIMATE) {
-                                        // Increase H2 (mistrust)
-                                        r_H2 = r_H2 + 1;
-                                        reg_H2.write(hash_idx, r_H2);
+                                        // Increase distrust directly
+                                        if (r_distrust < 31) {
+                                            r_distrust = r_distrust + 1;
+                                        }
+                                        reg_distrust.write(hash_idx, r_distrust);
+                                        calculated_distrust = r_distrust;
                                         // Reset n_noRTX
                                         reg_n_noRTX.write(hash_idx, 0);
                                     }
-                                }
-
-                                // Re-calculate distrust dynamically after updates
-                                if (r_H2 + 1 >= r_H1) {
-                                    calculated_distrust = (bit<5>)((r_H2 - r_H1) + 1);
-                                } else {
-                                    calculated_distrust = 0;
                                 }
 
                                 // Probabilistic drop (5%) if in ambiguous state (distrust > 0)
