@@ -106,28 +106,34 @@
 
 \section{Introdução}
 
-Ao longo dos anos, diversas tecnologias surgiram para fornecer uma infraestrutura mais robusta contra ameaças de cibersegurança em redes.
+O \textit{IP spoofing} consiste na criação de pacotes com um endereço IP falsificado,
+seja para ocultar a identidade do remetente ou personificar um sistema legítimo~\cite{wiki:ip_spoofing}.
+Tipicamente, essa técnica é aplicada em ataques de negação de serviço como o TCP SYN flood,
+exaurindo os recursos do receptor ao inundá-lo com requisições de conexão falsificadas.
+Ao longo dos anos, diversas tecnologias surgiram para fornecer uma infraestrutura mais robusta contra esses tipos de ameaça.
 Dentre elas, o advento dos comutadores programáveis de pacotes representa uma mudança de paradigma.
-Esses dispositivos conseguem processar bilhões de pacotes por segundo (throughput na ordem de Tbps) e realizar inspeção de pacotes em tempo real.
-Através de linguagens de domínio específico, como P4 (Programming Protocol-independent Packet Processors),
-tornou-se possível customizar o processamento de cabeçalhos e a lógica de encaminhamento diretamente no plano de dados.
-Isso permite implementar políticas de segurança ágeis que identificam e respondem a tráfego malicioso antes de sua entrada efetiva na rede,
+
+Comutadores programáveis são dispositivos de rede que conseguem processar bilhões de pacotes por segundo
+(throughput na ordem de Tbps) e realizar a inspeção deles em tempo real.
+Através de linguagens como P4 (Programming Protocol-independent Packet Processors),
+é possível programar o processamento de cabeçalhos e a lógica de encaminhamento do dispositivo diretamente no plano de dados.
+Isso permite implementar políticas de segurança ágeis contra tráfego malicioso antes de sua entrada efetiva na rede,
 evitando gargalos de comunicação e latência que são comuns em soluções dependentes do plano de controle.
 
 Aproveitando o potencial dessa arquitetura, Xiao et al. propuseram o P4Drop,
-uma função heurística para mitigar ataques TCP baseados em \textit{IP spoofing}~\cite{p4drop}.
-O \textit{IP spoofing} consiste na criação de pacotes com um endereço IP falsificado,
-seja para ocultar a identidade do remetente ou personificar um sistema legítimo~\cite{wiki:ip_spoofing}.
-Para mitigar essa ameaça, o P4Drop estabelece um mecanismo de confiança baseado no descarte ativo de pacotes dos fluxos TCP.
-O princípio básico reside na confiabilidade do TCP: fluxos legitimos vão retransmitir os pacotes descartados, diferentemente dos fluxos falsos.
-Os resultados experimentais da proposta original demonstraram o bloqueio de 98,6\% dos pacotes maliciosos.
+uma função heurística para bloquear ataques TCP baseados em \textit{IP spoofing}~\cite{p4drop}.
+O P4Drop propõe um mecanismo de confiança baseado no descarte ativo de pacotes dos fluxos TCP.
+O princípio básico reside na confiabilidade do TCP: fluxos legítimos vão retransmitir os pacotes descartados, diferentemente dos fluxos falsos.
+Os resultados experimentais da proposta demonstraram vazamento de apenas 1,4\% dos pacotes maliciosos.
 
-No entanto, a heurística do P4Drop apresenta limitações arquiteturais,
-uma vez que foi modelado para funcionar exclusivamente com IPv4.
-Com a adoção maciça e irreversível do IPv6, as redes modernas operam majoritariamente em pilha dupla.
-Neste contexto, o presente trabalho apresenta o P4DropExt,
-uma adaptação do P4Drop para operar nativamente em redes IPv6 e IPv4.
-(Falar algo sobre os resultados na versão final)
+No entanto, o P4Drop foi modelado para funcionar exclusivamente com IPv4,
+e a adoção maciça do IPv6~\cite{ipv6stat} torna o IPv4 em redes modernas oficialmente uma tecnologia legada. % https://www.google.com/intl/en/ipv6/statistics.html
+Neste contexto, o presente trabalho apresenta o P4DropExt, uma adaptação do P4Drop para operar nativamente em redes IPv6 e IPv4.
+Os experimentos revelam que o P4Drop e o P4DropExt mantêm a taxa de entrega do tráfego legítimo acima de 99\%.
+Já em relação ao tráfego malicioso, o vazamento máximo é de 25\%.
+Embora exista uma aparente incoerência de desempenho do P4Drop em relação ao artigo original,
+isso decorre de a implementação ter sido desenvolvida do zero com auxílio de Inteligência Artificial, e sem o ajuste fino de hiperparâmetros.
+Logo, apesar dos resultados inferiores, há possibilidade de melhorias em trabalhos futuros.
 
 (falar como está a organização do artigo; sujeito a mudanças)
 %A solução aborda os desafios intrínsecos do novo protocolo
@@ -649,19 +655,18 @@ Em todos os cenários e variantes avaliados, a taxa de entrega dos fluxos legít
 o que comprova que as defesas implementadas não causam impactos negativos ou prejuízos ao tráfego legítimo de usuários.
 
 A análise experimental mostra que, sob o modelo de ataque simples (Sem Histórico),
-todas as três variantes do switch apresentam eficácia semelhante, limitando o vazamento de tráfego malicioso (ALR) a um patamar próximo de 20\%.
+todas as três variantes apresentam eficácia semelhante, limitando o vazamento de tráfego malicioso a um patamar próximo de 20\%.
 Sob a estratégia de ataque mais complexa (Com Histórico), o P4DropExt sob IPv6 sofre um leve aumento de vazamento, subindo de 20\% para 25\%.
 Além disso, a probabilidade de entrega por índice de pacote revela que todas as variantes se comportam de acordo com o esperado,
 descartando o primeiro pacote do fluxo e convergindo de forma coordenada para o bloqueio efetivo por volta do sexagésimo pacote de ataque.
 
-Como considerações finais, destaca-se que o baseline do P4Drop foi implementado a partir do zero com o auxílio de ferramentas de Inteligência Artificial.
-Além disso, não houve tentativa de ajuste fino (\textit{fine-tuning}) dos hiperparâmetros da heurística P4Drop
-e nem da configuração do ambiente de simulação, o que também pode ter contribuído para essa diferença.
-Todos esses fatores provavelmente influenciam a discrepância entre a taxa de bloqueio obtida neste estudo
+Como considerações finais, destaca-se novamente que o baseline do P4Drop foi implementado a partir do zero com o auxílio de Inteligência Artificial,
+e que não houve tentativa de ajuste fino (\textit{fine-tuning}) dos hiperparâmetros da heurística P4Drop.
+Todos esses fatores influenciam a discrepância entre a taxa de bloqueio obtida neste estudo
 (cerca de 75\% a 85\%) e a reportada no trabalho original (98,6\%).
-Logo, isso leva à concluir que há possibilidade de obter melhores resultados em trabalhos futuros.
-Como próximos passos, propõe-se: (i) conduzir uma verificação profunda da implementação do baseline;
-(ii) realizar o ajuste fino dos hiperparâmetros e das configurações do ambiente;
+Logo, isso leva a concluir que há possibilidade de obter melhores resultados em trabalhos futuros.
+Como próximos passos, propõe-se: (i) melhoria da implementação baseline;
+(ii) realizar o ajuste fino dos hiperparâmetros;
 (iii) executar simulações com um número maior de rodadas e de fluxos concorrentes;
 e (iv) avaliar a viabilidade de desenvolver defesas para outros protocolos da camada de transporte, como UDP ou QUIC.
 
