@@ -12,6 +12,8 @@
 
 \usepackage{hyperref} % references can be clicked
 
+\usepackage{placeins} % \FloatBarrier
+
 \usepackage{listings}
 \usepackage{xcolor}
 \usepackage{tikz}
@@ -450,14 +452,52 @@ O comportamento lógico dessa representação unificada opera sob as seguintes r
 \end{figure}
 
 \section{P4DropExt}
-\label{sec:p4drop-ext}
+\label{sec:p4de}
 
-IPv4 e IPv6 possuem várias diferenças.
-Dentre elas, uma notável é o tamanho dos endereços.
-O IPv4 utiliza endereços de 4 bytes, enquanto o IPv6 usa 16 bytes.
-Isso impactaria significativamente o tamanho do registro associado ao fluxo, pensando em uma adaptação simples.
-Em particular, o tamanho do registro aumenta de 25 bytes para 49 bytes.
+Esta seção aborda os desafios de projeto e implementação do P4DropExt,
+que envolvem o aumento do consumo de memória e a fragmentação de datagramas IPv6.
+Recomenda-se a leitura das Seções~\ref{sec:p4} e~\ref{sec:p4drop} para um melhor entendimento desta seção.
 
+\subsection{Armazenamento}
+\label{sec:p4de:armaz}
+
+Os campos \texttt{reg\_srcIP} e \texttt{reg\_dstIP} usam 32 bits cada, totalizando 64 bits.
+Para suportar IPv6 de forma direta, seria necessário aumentar cada um dos dois campos para 128 bits.
+Embora simples, essa mudança iria aumentar o tamanho total de cada registro de 25 bytes para 49 bytes.
+% explicar o cálculo
+Devido às limitações de memória nos switches, essa solução é inviável.
+
+A alternativa adotada no P4DropExt foi gerar uma assinatura única de 64 bits (\texttt{reg\_sig})
+a partir de dois hashes CRC32 de 32 bits.
+A entrada do hash combina o tipo de protocolo (\texttt{TYPE\_IPV4} ou \texttt{TYPE\_IPV6}),
+os IPs de origem e destino, e as portas TCP.
+O tipo de protocolo evita colisões de assinaturas entre fluxos IPv4 e IPv6.
+Essa abordagem mantém o tamanho da assinatura fixo em 64 bits para ambos os protocolos,
+economizando memória no switch com um custo de processamento desprezível.
+
+\subsection{Fragmentação IP}
+\label{sec:p4de:frag}
+
+A fragmentação de pacotes prejudica a lógica do P4Drop e do P4DropExt.
+Para detectar retransmissões, o switch precisa calcular a lacuna de sequência (gap) gerada pelo descarte ativo.
+Esse cálculo depende do tamanho da carga útil TCP (obtido do cabeçalho IP).
+Se o pacote estiver fragmentado, o tamanho indicado no cabeçalho IP não reflete o tamanho original do transporte,
+inviabilizando o cálculo correto do gap.
+Além disso, o switch precisa das portas TCP e números de sequência para validar o fluxo.
+Em pacotes fragmentados, apenas o primeiro fragmento contém o cabeçalho TCP.
+Sem esse cabeçalho, o switch não consegue gerar a assinatura do fluxo.
+
+Originalmente, os autores do P4Drop propõem uma equação teórica para estimar o tamanho do pacote somando o deslocamento e o comprimento do último fragmento.
+No entanto, eles desconsideram esse tratamento na implementação,
+admitindo que é inviável para o switch observar e reassociar todos os fragmentos no plano de dados.
+
+O P4DropExt adota o descarte ativo de fragmentos.
+No IPv4, os fragmentos são detectados diretamente no cabeçalho de 20 bytes
+(verificando se o deslocamento é maior que zero ou se a flag \textit{More Fragments} está ativa).
+No IPv6, o switch inspeciona a cadeia de cabeçalhos.
+Caso o campo \texttt{nextHeader} do cabeçalho base (ou de cabeçalhos anteriores) seja igual a 44 (que indica um \textit{Fragment Header}), o pacote é descartado.
+Essa abordagem é aceitável porque a MTU do caminho pode ser descoberta dinamicamente para evitar a fragmentação~\cite{rfc1191, rfc8201}.
+Além disso, a fragmentação é amplamente desencorajada por questões de segurança e desempenho~\cite{rfc8900, rfc1858}.
 
 \section{Avaliação}
 \label{sec:avaliacao}
@@ -465,45 +505,33 @@ Em particular, o tamanho do registro aumenta de 25 bytes para 49 bytes.
 Esta seção descreve a metodologia e as métricas empregadas para validar as implementações
 e comparar a eficácia do P4Drop com a adaptação dual-stack P4DropExt.
 
-\subsection{Ambiente de Simulação e Topologia}
+\subsection{Ambiente e Parâmetros de Simulação}
 
-As simulações foram executadas utilizando a ferramenta \texttt{p4app},
-a qual automatiza o processo de compilação dos programas P4 e gerencia a criação
-de uma infraestrutura de rede virtualizada via emulador Mininet.
-Os comutadores de software operam com base no modelo comportamental \textit{Behavioral Model v2} (BMv2).
-A topologia de rede adotada é composta por um hospedeiro de origem,
-conectado a um hospedeiro de destino por meio do switch programável executando o datapath P4.
+A infraestrutura de teste utiliza a ferramenta \texttt{p4app}~\footnote{\url{https://github.com/p4lang/p4app}}
+para instanciar o ambiente de simulação por meio de contêineres Docker.
+Esse ambiente executa o emulador Mininet e o switch virtual BMv2 em um computador com processador Intel Core i5-12450H, 8~GB de RAM e sistema Linux (kernel Zen).
 
-Para fins de validação e análise estatística, cada cenário experimental foi executado $R = 5$ vezes de forma independente.
-Em cada rodada de simulação, o tráfego é composto por 100 fluxos concorrentes baseados no protocolo TCP,
-distribuídos em 90 fluxos legítimos (gerando tráfego com o mesmo endereço IP de origem, mas com portas de origem diferentes);
-e 10 fluxos falsificados (gerando tráfego de ataque com endereços IP de origem forjados).
+A topologia adotada conecta diretamente o emissor ao destinatário através de um único switch programável.
+Durante os experimentos, o tráfego totaliza 100 fluxos TCP concorrentes, divididos em 90 conexões legítimas e 10 spoofadas.
+As conexões legítimas operam como transmissões contínuas (\textit{bulksend}) compartilhando o mesmo IP de origem com portas distintas,
+enquanto as de ataque utilizam IPs e portas forjados. Cada execução dura 100 segundos, com as atividades maliciosas ativas entre os segundos 30 e 90.
 
-O tráfego de carga útil é do tipo \texttt{bulksend},
-de modo a simular transmissões massivas e contínuas de pacotes de dados.
-A duração total de cada execução de simulação foi definida em 100 segundos.
-Para avaliar a reação dinâmica da heurística no switch,
-os fluxos legítimos operam de forma contínua durante toda a simulação,
-enquanto o ataque de falsificação é iniciado no segundo 30 e encerrado no segundo 90.
-
-Os fluxos de ataque (falsificados) são gerados com o intuito de tentar burlar a validação do P4Drop.
-Para tanto, o atacante adota uma probabilidade fixa de 10\% para simular retransmissões de pacotes TCP,
-visando convencer o comutador de que se trata de um fluxo legítimo operando em malha fechada.
-Para avaliar a robustez do switch contra diferentes sofisticações de ataque,
-foram implementados dois mecanismos distintos para essa simulação de retransmissão:
+Os fluxos de ataque retransmitem pacotes com uma probabilidade fixa de 10\% na tentativa de simular uma conexão em malha fechada e burlar a defesa.
+Alem disso, a avaliação adota duas estratégias distintas para simular essas retransmissões:
 \begin{itemize}
-    \item \textbf{Modelo Sem Histórico (\textit{No-Backlog}):} O atacante simula as retransmissões
-    repetindo estritamente o número de sequência do último pacote que foi enviado.
-    \item \textbf{Modelo Com Histórico (\textit{Backlog}):} O atacante mantém uma fila de histórico
-    com capacidade para armazenar os últimos 32 números de sequência transmitidos.
-    A simulação de retransmissão é executada selecionando e repetindo um número de sequência
-    aleatório contido nesse histórico.
+    \item \textbf{Modelo Sem Histórico (\textit{No-Backlog}):} representa uma evasão simples,
+    na qual o atacante apenas repete o número de sequência do último pacote enviado.
+    \item \textbf{Modelo Com Histórico (\textit{Backlog}):} simula um comportamento mais complexo,
+    mantendo um histórico dos últimos 32 números de sequência enviados e retransmitindo um deles de forma aleatória.
 \end{itemize}
+
+Cada cenário experimental executa $R = 5$ vezes de forma independente, garantindo a validade estatística dos resultados.
+Os experimentos avaliam os dois modelos de retransmissão em conjunto com cada uma das variantes do P4Drop:
+o original, o P4DropExt operando sob IPv4 e o P4DropExt sob IPv6.
 
 \subsection{Métricas de Desempenho}
 
-Para analisar o comportamento do P4Drop e do P4DropExt,
-foram avaliadas duas métricas fundamentais:
+A análise do comportamento do P4Drop e do P4DropExt considera duas métricas fundamentais:
 
 \begin{enumerate}
     \item \textbf{Razão de Entrega de Pacotes:} Representa o percentual total de pacotes de dados enviados
@@ -514,7 +542,7 @@ foram avaliadas duas métricas fundamentais:
         \item \textit{Attack Leak Rate} (ALR): indica a proporção de pacotes falsificados que evadiram
         o bloqueio do switch e alcançaram o destino, sendo desejável que esse valor seja o mais próximo de 0\% possível.
     \end{itemize}
-    As taxas de LDR e ALR são calculadas pelas Equações~(\ref{eq:eval:ldr}) e~(\ref{eq:eval:alr}):
+    As taxas de LDR e ALR são dadas pelas Equações~(\ref{eq:eval:ldr}) e~(\ref{eq:eval:alr}):
     \begin{equation}
         LDR = \frac{N_{L}}{N_{S}} \times 100\%
         \label{eq:eval:ldr}
@@ -525,34 +553,74 @@ foram avaliadas duas métricas fundamentais:
     \end{equation}
     em que $N_{L}$ e $N_{S}$ representam os pacotes legítimos recebidos e enviados, respectivamente,
     enquanto $A_{L}$ e $A_{S}$ denotam os pacotes de ataque vazados (recebidos) e transmitidos, respectivamente.
-    Para representar a variabilidade dessas taxas ao longo das rodadas, os resultados são reportados
-    com barras de erro correspondentes ao Erro Padrão da Média (SEM - \textit{Standard Error of the Mean}), dado por:
-    \begin{equation}
-        SEM = \frac{S}{\sqrt{R}}
-        \label{eq:eval:sem}
-    \end{equation}
-    em que $S$ representa o desvio padrão amostral das taxas LDR e ALR, e $R = 5$ é o número de rodadas.
 
-    \item \textbf{Probabilidade de Entrega por Índice de Pacote:} Permite analisar a velocidade de reação
-    da heurística no plano de dados independente do fator tempo.
-    Para o conjunto consolidado de fluxos de ataque obtido ao longo de todas as rodadas,
-    representando uma população total de $M = R \times F = 50$ fluxos maliciosos,
-    define-se para cada fluxo $i \in \{1, 2, \dots, M\}$ um perfil de entrega
-    $P_i = [p_{i,1}, p_{i,2}, \dots, p_{i,K}]$, no qual $p_{i,k} = 1$ caso o $k$-ésimo pacote cronológico
-    daquele fluxo tenha sido encaminhado com sucesso, e $p_{i,k} = 0$ se tiver sido descartado pelo switch.
-    A probabilidade de entrega para o $k$-ésimo pacote, $P(k)$, é computada pela média:
+    \item \textbf{Probabilidade de Entrega por Índice de Pacote:} Mostra o comportamento de bloqueio do switch
+    cronologicamente sem depender do tempo.
+    O cálculo dessa probabilidade considera todos os fluxos de ataque de todas as rodadas, totalizando $M = 50$ fluxos maliciosos.
+    Cada fluxo $i$ possui um perfil de entrega de pacotes $P_i = [p_{i,1}, p_{i,2}, \dots, p_{i,200}]$,
+    onde $p_{i,k}$ indica se o $k$-ésimo pacote foi encaminhado (1) ou descartado (0) pelo comutador.
+    Dessa forma, a probabilidade de entrega $P(k)$ para um determinado índice $k$ é obtida pela média dos $M$ estados de encaminhamento:
     \begin{equation}
         P(k) = \frac{1}{M} \sum_{i=1}^{M} p_{i,k}
         \label{eq:eval:profile}
     \end{equation}
-    Essa métrica indica quantos pacotes de ataque conseguem vazar e atravessar o comutador
-    antes que o fluxo seja definitivamente bloqueado (isto é, até que a probabilidade $P(k)$ caia para a taxa residual de amostragem de 5\%).
 \end{enumerate}
 
-\section{Resultados}
+Este trabalho adota o Erro Padrão da Média (SEM -- \textit{Standard Error of the Mean}) para representar a variabilidade estatística dos resultados.
+Nas taxas agregadas de LDR e ALR, o erro é computado a partir das $R = 5$ rodadas de simulação:
+\begin{equation}
+    SEM = \frac{S}{\sqrt{R}}
+    \label{eq:eval:sem}
+\end{equation}
+em que $S$ representa o desvio padrão amostral das taxas obtidas.
 
-Talvez seja uma subseção de experimentos.
+Já para a probabilidade de entrega por índice de pacote, a variabilidade de $P(k)$ entre as $M$ amostras de fluxos de ataque é calculada por:
+\begin{equation}
+    SEM_{P(k)} = \frac{S_k}{\sqrt{M}}
+    \label{eq:eval:sempk}
+\end{equation}
+onde $S_k$ é o desvio padrão amostral calculado especificamente para cada índice $k$.
 
+\subsection{Resultados}
+
+As Figuras~\ref{fig:res:razoes_sem} e~\ref{fig:res:razoes_com} apresentam as taxas agregadas de entrega (LDR) e vazamento (ALR) de tráfego.
+Sob o modelo de ataque sem backlog (Figura~\ref{fig:res:razoes_sem}), onde as retransmissões ocorrem de forma simples,
+as três variantes apresentam eficácia semelhante, limitando o vazamento de tráfego malicioso a um teto de aproximadamente 20\%.
+No entanto, sob o modelo de ataque com backlog (Figura~\ref{fig:res:razoes_com}),
+o P4DropExt sob IPv6 sofre uma degradação com o vazamento máximo subindo de 20\% para 25\%.
+
+As Figuras~\ref{fig:res:taxa_sem} e~\ref{fig:res:taxa_com} ilustram a velocidade de mitigação do ataque por meio da probabilidade de entrega $P(k)$.
+Todos os cenários mostram que o primeiro pacote tem uma probabilidade de entrega próxima de 0\%,
+o que condiz com o comportamento esperado de descarte do primeiro pacote.
+Também em todos os cenários, os fluxos registram uma queda brusca por volta do sexagésimo patote,
+refletindo que todas as implementações convergem para o bloqueio nesse ponto.
+
+\begin{figure}[htbp]
+    \centering
+    \makebox[\textwidth][c]{\includegraphics[width=1.1\textwidth]{figs/razoes-sem-backlog.jpg}}
+    \caption{Taxas de LDR e ALR no cenário Sem Histórico (\textit{No-Backlog}).}
+    \label{fig:res:razoes_sem}
+\end{figure}
+\begin{figure}[htbp]
+    \centering
+    \makebox[\textwidth][c]{\includegraphics[width=1.1\textwidth]{figs/razoes-com-backlog.jpg}}
+    \caption{Taxas de LDR e ALR no cenário Com Histórico (\textit{Backlog}).}
+    \label{fig:res:razoes_com}
+\end{figure}
+\begin{figure}[htbp]
+    \centering
+    \makebox[\textwidth][c]{\includegraphics[width=1.1\textwidth]{figs/taxa-sem-backlog.jpg}}
+    \caption{Evolução de $P(k)$ no cenário Sem Histórico (\textit{No-Backlog}).}
+    \label{fig:res:taxa_sem}
+\end{figure}
+\begin{figure}[htbp]
+    \centering
+    \makebox[\textwidth][c]{\includegraphics[width=1.1\textwidth]{figs/taxa-com-backlog.jpg}}
+    \caption{Evolução de $P(k)$ no cenário Com Histórico (\textit{Backlog}).}
+    \label{fig:res:taxa_com}
+\end{figure}
+
+\FloatBarrier
 
 \section{Trabalhos Relacionados}
 
