@@ -84,11 +84,23 @@
 \maketitle
 
 \begin{abstract}
-  ...
+  IP spoofing facilitates distributed denial-of-service (DDoS) attacks that disrupt internet service stability.
+  P4Drop addresses this threat directly in the programmable data plane by validating TCP retransmissions.
+  However, the original solution is limited to IPv4, a legacy technology mostly replaced by its successor, IPv6.
+  This paper then presents P4DropExt, a dual-stack (IPv4/IPv6) extension to P4Drop.
+  Experimental results show that P4DropExt protects legitimate traffic,
+  maintaining delivery above 99\%, and limits attack leakage to around 20\% (without backlog) and 25\% (with backlog in IPv6).
+  Despite inferior results compared to the original work, there is room for future improvements.
 \end{abstract}
 
 \begin{resumo}
-  ...
+  O spoofing de endereços IP facilita ataques de negação de serviço distribuídos (DDoS) que afetam a estabilidade de serviços na internet.
+  O P4Drop mitiga essa ameaça diretamente no plano de dados programável por meio da validação de retransmissões TCP.
+  Contudo, a solução original limita-se ao IPv4, uma tecnologia legada amplamente substituída por seu sucessor, o IPv6.
+  Este trabalho apresenta o P4DropExt, uma extensão dual-stack (IPv4/IPv6) do P4Drop.
+  Os resultados experimentais mostram que o P4DropExt protege o tráfego legítimo, mantendo a entrega acima de 99\%,
+  e limita o vazamento de ataque a aproximadamente 20\% (sem backlog) e 25\% (com backlog em IPv6).
+  Apesar de obter resultados inferiores em comparação com o trabalho original, há margem para melhorias futuras.
 \end{resumo}
 
 
@@ -585,13 +597,13 @@ onde $S_k$ é o desvio padrão amostral calculado especificamente para cada índ
 
 As Figuras~\ref{fig:res:razoes_sem} e~\ref{fig:res:razoes_com} apresentam as taxas agregadas de entrega (LDR) e vazamento (ALR) de tráfego.
 Em todos os cenários e variantes avaliados, a taxa de entrega dos fluxos legítimos (LDR) permanece acima de 99\%,
-oque comprova que nenhuma das implementações prejudica o tráfego legítimo.
+o que comprova que nenhuma das implementações prejudica o tráfego legítimo.
 Sob o modelo de ataque sem backlog (Figura~\ref{fig:res:razoes_sem}), onde as retransmissões ocorrem de forma simples,
 as três variantes apresentam eficácia semelhante, limitando o vazamento de tráfego malicioso a um teto de aproximadamente 20\%.
 No entanto, sob o modelo de ataque com backlog (Figura~\ref{fig:res:razoes_com}),
 o P4DropExt sob IPv6 sofre uma degradação com o vazamento máximo subindo de 20\% para 25\%.
 
-As Figuras~\ref{fig:res:taxa_sem} e~\ref{fig:res:taxa_com} ilustram a velocidade de mitigação do ataque por meio da probabilidade de entrega $P(k)$.
+As Figuras~\ref{fig:res:taxa_sem} e~\ref{fig:res:taxa_com} ilustram a velocidade de bloqueio do ataque por meio da probabilidade de entrega $P(k)$.
 Todos os cenários mostram que o primeiro pacote tem uma probabilidade de entrega próxima de 0\%,
 o que condiz com o comportamento esperado de descarte do primeiro pacote.
 Também em todos os cenários, os fluxos registram uma queda brusca por volta do sexagésimo pacote,
@@ -632,15 +644,26 @@ refletindo que todas as implementações convergem para o bloqueio nesse ponto.
 \section{Conclusão}
 
 Este trabalho apresenta a extensão e a avaliação da heurística P4Drop sob pilhas duplas (IPv4/IPv6) na ferramenta P4DropExt.
-Os resultados confirmam a eficácia da abordagem de assinaturas hash unificadas, que viabiliza o suporte dual-stack no plano de dados sem comprometer a escassa memória SRAM dos switches programáveis.
+Os resultados confirmam a viabilidade do suporte dual-stack no plano de dados.
+Em todos os cenários e variantes avaliados, a taxa de entrega dos fluxos legítimos (LDR) permanece acima de 99\%,
+o que comprova que as defesas implementadas não causam impactos negativos ou prejuízos ao tráfego legítimo de usuários.
 
-Uma contribuição central deste estudo é a análise comparativa entre o modelo de ataque simples (Sem Histórico) e o modelo sofisticado (Com Histórico).
-Os experimentos revelam que o P4Drop original é vulnerável a ataques de backlog espaçados no tempo, apresentando um aumento expressivo no vazamento de pacotes maliciosos, enquanto o P4DropExt mantém maior resiliência em ambas as pilhas de protocolos.
-Além disso, a taxa de entrega dos fluxos legítimos permanece acima de 99\% em todas as variantes e cenários, o que comprova que nenhuma das implementações ou modificações no plano de dados prejudica o tráfego legítimo.
+A análise experimental mostra que, sob o modelo de ataque simples (Sem Histórico),
+todas as três variantes do switch apresentam eficácia semelhante, limitando o vazamento de tráfego malicioso (ALR) a um patamar próximo de 20\%.
+Sob a estratégia de ataque mais complexa (Com Histórico), o P4DropExt sob IPv6 sofre um leve aumento de vazamento, subindo de 20\% para 25\%.
+Além disso, a probabilidade de entrega por índice de pacote revela que todas as variantes se comportam de acordo com o esperado,
+descartando o primeiro pacote do fluxo e convergindo de forma coordenada para o bloqueio efetivo por volta do sexagésimo pacote de ataque.
 
-Como considerações finais, este estudo destaca que o baseline do P4Drop foi implementado do zero com o auxílio de ferramentas de Inteligência Artificial.
-Embora exista uma discrepância entre a taxa de bloqueio obtida neste trabalho (cerca de 84\% a 85\%) e a reportada no artigo original (98,6\%), ressalta-se que o ajuste fino de parâmetros da heurística e as configurações específicas do ambiente de rede não foram explorados.
-Trabalhos futuros devem focar no ajuste e otimização desses parâmetros para aproximar os resultados do patamar de mitigação ideal.
+Como considerações finais, destaca-se que o baseline do P4Drop foi implementado a partir do zero com o auxílio de ferramentas de Inteligência Artificial.
+Além disso, não houve tentativa de ajuste fino (\textit{fine-tuning}) dos hiperparâmetros da heurística P4Drop
+e nem da configuração do ambiente de simulação, o que também pode ter contribuído para essa diferença.
+Todos esses fatores provavelmente influenciam a discrepância entre a taxa de bloqueio obtida neste estudo
+(cerca de 75\% a 85\%) e a reportada no trabalho original (98,6\%).
+Logo, isso leva à concluir que há possibilidade de obter melhores resultados em trabalhos futuros.
+Como próximos passos, propõe-se: (i) conduzir uma verificação profunda da implementação do baseline;
+(ii) realizar o ajuste fino dos hiperparâmetros e das configurações do ambiente;
+(iii) executar simulações com um número maior de rodadas e de fluxos concorrentes;
+e (iv) avaliar a viabilidade de desenvolver defesas para outros protocolos da camada de transporte, como UDP ou QUIC.
 
 \bibliographystyle{sbc}
 % \bibliographystyle{unsrt} % i like this style more
