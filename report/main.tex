@@ -584,6 +584,8 @@ onde $S_k$ é o desvio padrão amostral calculado especificamente para cada índ
 \subsection{Resultados}
 
 As Figuras~\ref{fig:res:razoes_sem} e~\ref{fig:res:razoes_com} apresentam as taxas agregadas de entrega (LDR) e vazamento (ALR) de tráfego.
+Em todos os cenários e variantes avaliados, a taxa de entrega dos fluxos legítimos (LDR) permanece acima de 99\%,
+oque comprova que nenhuma das implementações prejudica o tráfego legítimo.
 Sob o modelo de ataque sem backlog (Figura~\ref{fig:res:razoes_sem}), onde as retransmissões ocorrem de forma simples,
 as três variantes apresentam eficácia semelhante, limitando o vazamento de tráfego malicioso a um teto de aproximadamente 20\%.
 No entanto, sob o modelo de ataque com backlog (Figura~\ref{fig:res:razoes_com}),
@@ -592,7 +594,7 @@ o P4DropExt sob IPv6 sofre uma degradação com o vazamento máximo subindo de 2
 As Figuras~\ref{fig:res:taxa_sem} e~\ref{fig:res:taxa_com} ilustram a velocidade de mitigação do ataque por meio da probabilidade de entrega $P(k)$.
 Todos os cenários mostram que o primeiro pacote tem uma probabilidade de entrega próxima de 0\%,
 o que condiz com o comportamento esperado de descarte do primeiro pacote.
-Também em todos os cenários, os fluxos registram uma queda brusca por volta do sexagésimo patote,
+Também em todos os cenários, os fluxos registram uma queda brusca por volta do sexagésimo pacote,
 refletindo que todas as implementações convergem para o bloqueio nesse ponto.
 
 \begin{figure}[htbp]
@@ -629,7 +631,16 @@ refletindo que todas as implementações convergem para o bloqueio nesse ponto.
 
 \section{Conclusão}
 
-...
+Este trabalho apresenta a extensão e a avaliação da heurística P4Drop sob pilhas duplas (IPv4/IPv6) na ferramenta P4DropExt.
+Os resultados confirmam a eficácia da abordagem de assinaturas hash unificadas, que viabiliza o suporte dual-stack no plano de dados sem comprometer a escassa memória SRAM dos switches programáveis.
+
+Uma contribuição central deste estudo é a análise comparativa entre o modelo de ataque simples (Sem Histórico) e o modelo sofisticado (Com Histórico).
+Os experimentos revelam que o P4Drop original é vulnerável a ataques de backlog espaçados no tempo, apresentando um aumento expressivo no vazamento de pacotes maliciosos, enquanto o P4DropExt mantém maior resiliência em ambas as pilhas de protocolos.
+Além disso, a taxa de entrega dos fluxos legítimos permanece acima de 99\% em todas as variantes e cenários, o que comprova que nenhuma das implementações ou modificações no plano de dados prejudica o tráfego legítimo.
+
+Como considerações finais, este estudo destaca que o baseline do P4Drop foi implementado do zero com o auxílio de ferramentas de Inteligência Artificial.
+Embora exista uma discrepância entre a taxa de bloqueio obtida neste trabalho (cerca de 84\% a 85\%) e a reportada no artigo original (98,6\%), ressalta-se que o ajuste fino de parâmetros da heurística e as configurações específicas do ambiente de rede não foram explorados.
+Trabalhos futuros devem focar no ajuste e otimização desses parâmetros para aproximar os resultados do patamar de mitigação ideal.
 
 \bibliographystyle{sbc}
 % \bibliographystyle{unsrt} % i like this style more
