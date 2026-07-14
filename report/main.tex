@@ -333,9 +333,8 @@ Pode ser também que o emissor envie pacotes com \texttt{TCP.seqNo <= maxSeq}, m
 Nesse caso o pacote é uma duplicata, e o switch penaliza o fluxo incrementando \texttt{H2} se a contagem de duplicatas ultrapassar o limiar $T_2 = 7$.
 
 % NOTA DE IMPLEMENTAÇÃO: O trabalho original do P4Drop descreve teoricamente a detecção de duplicatas
-% para qualquer pacote com seqNo <= maxSeq (que não cubra o gap). Porém, a implementação real
-% (conforme sims/p4drop.p4) adota um critério mais estrito para evitar falsos positivos de reordenação:
-% incrementa-se o contador de duplicatas apenas se seqNo == last_seq (duplicatas consecutivas imediatas).
+% para qualquer pacote com seqNo <= maxSeq (que não cubra o gap). Esta implementação adota
+% esse critério (conforme sims/p4drop.p4), comparando o número de sequência com maxSeq.
 
 Finalmente, se a desconfiança acumulada atingir o valor de bloqueio $Distrust \ge 5$, o switch bloqueia totalmente o fluxo.
 Sob desconfiança intermediária entre 0 e 5,
@@ -525,12 +524,12 @@ onde $S_k$ é o desvio padrão amostral calculado especificamente para cada índ
 
 \subsection{Resultados}
 
-As Figuras~\ref{fig:res:razoes_sem} e~\ref{fig:res:razoes_com} apresentam as taxas agregadas de entrega (LDR) e vazamento (ALR) de tráfego.
+A Figura~\ref{fig:res:razoes} apresenta as taxas agregadas de entrega (LDR) e vazamento (ALR) de tráfego.
 Em todos os cenários e variantes avaliados, a taxa de entrega dos fluxos legítimos (LDR) permanece acima de 99\%,
 o que comprova que nenhuma das implementações prejudica o tráfego legítimo.
-Sob o modelo de ataque sem backlog (Figura~\ref{fig:res:razoes_sem}), onde as retransmissões ocorrem de forma simples,
+Sob o modelo de ataque sem backlog, no qual as retransmissões ocorrem de forma simples,
 as três variantes apresentam eficácia semelhante, limitando o vazamento de tráfego malicioso a um teto de aproximadamente 20\%.
-No entanto, sob o modelo de ataque com backlog (Figura~\ref{fig:res:razoes_com}),
+No entanto, sob o modelo de ataque com backlog,
 o P4DropExt sob IPv6 sofre uma degradação com o vazamento máximo subindo de 20\% para 25\%.
 
 As Figuras~\ref{fig:res:taxa_sem} e~\ref{fig:res:taxa_com} ilustram a velocidade de bloqueio do ataque por meio da probabilidade de entrega $P(k)$.
@@ -541,16 +540,9 @@ refletindo que todas as implementações convergem para o bloqueio nesse ponto.
 
 \begin{figure}[htbp]
     \centering
-    \makebox[\textwidth][c]{\includegraphics[width=1.1\textwidth]{figs/razoes-sem-backlog.jpg}}
-    \caption{Taxas de LDR e ALR no cenário Sem Histórico (\textit{No-Backlog}).}
-    \label{fig:res:razoes_sem}
-\end{figure}
-
-\begin{figure}[htbp]
-    \centering
-    \makebox[\textwidth][c]{\includegraphics[width=1.1\textwidth]{figs/razoes-com-backlog.jpg}}
-    \caption{Taxas de LDR e ALR no cenário Com Histórico (\textit{Backlog}).}
-    \label{fig:res:razoes_com}
+    \makebox[\textwidth][c]{\includegraphics[width=1.1\textwidth]{figs/validation_correctness.png}}
+    \caption{Taxas agregadas de LDR e ALR nos cenários Sem Histórico (\textit{No-Backlog}) e Com Histórico (\textit{Backlog}).}
+    \label{fig:res:razoes}
 \end{figure}
 
 \begin{figure}[htbp]
