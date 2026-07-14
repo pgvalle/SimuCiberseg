@@ -192,7 +192,6 @@ control MyIngress(inout headers hdr,
     register<bit<5>>(FLOW_TABLE_SIZE) reg_distrust;
     register<bit<32>>(FLOW_TABLE_SIZE) reg_total_pkts;
     register<bit<5>>(FLOW_TABLE_SIZE) reg_dup_pkts;
-    register<bit<32>>(FLOW_TABLE_SIZE) reg_last_seq;
 
     apply {
         if (hdr.arp.isValid()) {
@@ -249,7 +248,6 @@ control MyIngress(inout headers hdr,
                     bit<5> r_distrust;
                     bit<32> r_total_pkts;
                     bit<5> r_dup_pkts;
-                    bit<32> r_last_seq;
 
                     reg_srcIP.read(r_srcIP, hash_idx);
                     reg_dstIP.read(r_dstIP, hash_idx);
@@ -261,7 +259,6 @@ control MyIngress(inout headers hdr,
                     reg_distrust.read(r_distrust, hash_idx);
                     reg_total_pkts.read(r_total_pkts, hash_idx);
                     reg_dup_pkts.read(r_dup_pkts, hash_idx);
-                    reg_last_seq.read(r_last_seq, hash_idx);
 
                     bit<1> is_new_flow = 0;
                     if (r_srcIP != hdr.ipv4.srcAddr || r_dstIP != hdr.ipv4.dstAddr) {
@@ -280,7 +277,6 @@ control MyIngress(inout headers hdr,
                         reg_distrust.write(hash_idx, 0);
                         reg_total_pkts.write(hash_idx, 1);
                         reg_dup_pkts.write(hash_idx, 0);
-                        reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
 
                         // Trigger active drop
                         drop();
@@ -314,12 +310,11 @@ control MyIngress(inout headers hdr,
                             // Update f_dup statistics
                             bit<32> next_total = r_total_pkts + 1;
                             bit<5> next_dup = r_dup_pkts;
-                            if (hdr.tcp.seqNo == r_last_seq) {
+                            if (hdr.tcp.seqNo <= r_maxSeq) {
                                 next_dup = r_dup_pkts + 1;
                             }
                             reg_total_pkts.write(hash_idx, next_total);
                             reg_dup_pkts.write(hash_idx, next_dup);
-                            reg_last_seq.write(hash_idx, hdr.tcp.seqNo);
 
                             // f_dup check: numerator * T2 >= denominator means high repetition rate (T2 = 7)
                             bit<32> threshold_check = (bit<32>)next_dup * 7;
