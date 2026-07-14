@@ -148,46 +148,74 @@ def available_experiments(out_dir):
     ]
 
 
-def save_validation_plot(out_dir, experiments):
+def save_validation_plot(base_out_dir, experiment_filter="all"):
+    no_backlog_dir = os.path.join(base_out_dir, "no_backlog")
+    experiments = available_experiments(no_backlog_dir)
+    if experiment_filter != "all":
+        experiments = [e for e in experiments if e[0] == experiment_filter]
+
+    if not experiments:
+        print("No experiments found for validation correctness plot.")
+        return
+
     labels = [label for _, label in experiments]
     x = np.arange(len(labels))
-    width = 0.36
+    width = 0.35
 
-    legit_means = []
-    legit_errs = []
-    spoof_means = []
-    spoof_errs = []
-
+    no_backlog_ldr_means = []
+    no_backlog_ldr_errs = []
+    no_backlog_alr_means = []
+    no_backlog_alr_errs = []
     for exp_name, _ in experiments:
-        mean, err = mean_and_sem(collect_metric(out_dir, exp_name, "ldr"))
-        legit_means.append(mean)
-        legit_errs.append(err)
+        mean, err = mean_and_sem(collect_metric(no_backlog_dir, exp_name, "ldr"))
+        no_backlog_ldr_means.append(mean)
+        no_backlog_ldr_errs.append(err)
 
-        mean, err = mean_and_sem(collect_metric(out_dir, exp_name, "alr"))
-        spoof_means.append(mean)
-        spoof_errs.append(err)
+        mean, err = mean_and_sem(collect_metric(no_backlog_dir, exp_name, "alr"))
+        no_backlog_alr_means.append(mean)
+        no_backlog_alr_errs.append(err)
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=True)
+    backlog_dir = os.path.join(base_out_dir, "backlog")
+    backlog_ldr_means = []
+    backlog_ldr_errs = []
+    backlog_alr_means = []
+    backlog_alr_errs = []
+    for exp_name, _ in experiments:
+        mean, err = mean_and_sem(collect_metric(backlog_dir, exp_name, "ldr"))
+        backlog_ldr_means.append(mean)
+        backlog_ldr_errs.append(err)
 
-    axes[0].bar(x, legit_means, width, yerr=legit_errs, color="#2e7d32", capsize=4)
-    axes[0].set_title("Entrega de Tráfego Legítimo")
+        mean, err = mean_and_sem(collect_metric(backlog_dir, exp_name, "alr"))
+        backlog_alr_means.append(mean)
+        backlog_alr_errs.append(err)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.8), sharey=True)
+
+    axes[0].bar(x - width/2, no_backlog_ldr_means, width, yerr=no_backlog_ldr_errs,
+                label="Sem Histórico", color="#81c784", capsize=4)
+    axes[0].bar(x + width/2, backlog_ldr_means, width, yerr=backlog_ldr_errs,
+                label="Com Histórico", color="#2e7d32", capsize=4)
+    axes[0].set_title("Entrega de Tráfego Legítimo (LDR)")
     axes[0].set_ylabel("Pacotes recebidos / transmitidos (%)")
     axes[0].set_xticks(x)
     axes[0].set_xticklabels(labels, rotation=0, ha="center")
     axes[0].set_ylim(0, 105)
     axes[0].grid(axis="y", alpha=0.25)
+    axes[0].legend(loc="lower left")
 
-    axes[1].bar(x, spoof_means, width, yerr=spoof_errs, color="#c62828", capsize=4)
-    axes[1].set_title("Vazamento de Tráfego Falsificado")
+    axes[1].bar(x - width/2, no_backlog_alr_means, width, yerr=no_backlog_alr_errs,
+                label="Sem Histórico", color="#e57373", capsize=4)
+    axes[1].bar(x + width/2, backlog_alr_means, width, yerr=backlog_alr_errs,
+                label="Com Histórico", color="#c62828", capsize=4)
+    axes[1].set_title("Vazamento de Tráfego Falsificado (ALR)")
     axes[1].set_xticks(x)
     axes[1].set_xticklabels(labels, rotation=0, ha="center")
     axes[1].set_ylim(0, 105)
     axes[1].grid(axis="y", alpha=0.25)
+    axes[1].legend(loc="upper right")
 
-    title_suffix = "sem backlog" if "no" in out_dir.lower() else "com backlog"
-    fig.suptitle(f"Razões totais de entrega/vazamento ({title_suffix})")
     fig.tight_layout()
-    fig.savefig(f"{out_dir}/validation_correctness.png")
+    fig.savefig(os.path.join(base_out_dir, "validation_correctness.png"))
     plt.close(fig)
 
 
@@ -322,7 +350,6 @@ def generate_plots(out_dir, experiment_filter="all"):
         )
         return
 
-    save_validation_plot(out_dir, experiments)
     save_flow_block_speed_plot(out_dir, experiments)
     print(f"Plots saved in {out_dir}/ directory.")
 
@@ -426,7 +453,10 @@ def main():
     print("Generating backlog plots...")
     generate_plots("out/backlog", args.experiment)
 
-    print("Plots generated successfully under out/no_backlog/ and out/backlog/.")
+    print("Generating merged validation correctness plot...")
+    save_validation_plot("out", args.experiment)
+
+    print("Plots generated successfully under out/no_backlog/, out/backlog/ and out/.")
 
 
 if __name__ == "__main__":
