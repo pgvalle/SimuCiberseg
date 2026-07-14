@@ -7,7 +7,7 @@ EXP ?= all
 
 .PHONY: setup run run plot plot clean
 
-all: setup run plot
+all: setup run
 
 setup:
 	python3 -m venv $(VENV)
