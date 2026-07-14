@@ -5,9 +5,9 @@ PIP = $(VENV)/bin/pip
 RUNS ?= 5
 EXP ?= all
 
-.PHONY: all setup run run plot plot clean
+.PHONY: setup run run plot plot clean
 
-all: setup run
+all: setup run plot
 
 setup:
 	python3 -m venv $(VENV)
