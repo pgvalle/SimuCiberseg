@@ -22,6 +22,9 @@ recv_ip = sys.argv[1]
 attack_ratio = ATTACK_RATIO
 start_time = time.time()
 
+print("ATTACKER INITIALIZED: ATTACK_MODEL = %s" % os.environ.get("ATTACK_MODEL", "no_backlog"))
+sys.stdout.flush()
+
 os.system("echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null")
 os.system("echo 0 > /proc/sys/net/ipv6/conf/h2-eth0/disable_ipv6 2>/dev/null")
 os.system("echo 0 > /proc/sys/net/ipv6/conf/h2-eth0/accept_dad 2>/dev/null")

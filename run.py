@@ -362,6 +362,9 @@ def run_sim(config_path, log_dir, env_extra=None):
     env["P4APP_LOGDIR"] = log_dir
     if env_extra:
         env.update(env_extra)
+        if "ATTACK_MODEL" in env_extra:
+            existing_args = env.get("P4APP_CONTAINER_ARGS", "")
+            env["P4APP_CONTAINER_ARGS"] = f"{existing_args} -e ATTACK_MODEL={env_extra['ATTACK_MODEL']}".strip()
 
     print(f"Running: {config_path} -> {log_dir} (env: {env_extra})")
     res = subprocess.run(

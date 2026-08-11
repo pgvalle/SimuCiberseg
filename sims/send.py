@@ -21,6 +21,10 @@ recv_ip = sys.argv[1]
 attack_ratio = ATTACK_RATIO
 start_time = time.time()
 
+import os
+print("ATTACKER INITIALIZED: ATTACK_MODEL = %s" % os.environ.get("ATTACK_MODEL", "no_backlog"))
+sys.stdout.flush()
+
 
 def legit_flow():
     try:
